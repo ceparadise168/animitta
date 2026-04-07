@@ -3,6 +3,7 @@ import {
   QueryCommand,
   GetItemCommand,
   PutItemCommand,
+  DeleteItemCommand,
   BatchWriteItemCommand,
 } from '@aws-sdk/client-dynamodb'
 
@@ -146,4 +147,56 @@ export async function compressOldTurns(userId, provider) {
       })
     )
   }
+}
+
+/**
+ * Delete all turns and summary for a user.
+ */
+export async function clearMemory(userId) {
+  const pk = `USER#${userId}`
+
+  // Get all items for this user
+  const res = await client.send(
+    new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: 'pk = :pk',
+      ExpressionAttributeValues: { ':pk': { S: pk } },
+    })
+  )
+
+  const items = res.Items || []
+  if (items.length === 0) return
+
+  // Delete in batches of 25
+  for (let i = 0; i < items.length; i += 25) {
+    const batch = items.slice(i, i + 25)
+    await client.send(
+      new BatchWriteItemCommand({
+        RequestItems: {
+          [TABLE]: batch.map((item) => ({
+            DeleteRequest: {
+              Key: { pk: item.pk, sk: item.sk },
+            },
+          })),
+        },
+      })
+    )
+  }
+}
+
+/**
+ * Store user feedback.
+ */
+export async function saveFeedback(userId, rating) {
+  await client.send(
+    new PutItemCommand({
+      TableName: TABLE,
+      Item: {
+        pk: { S: `FEEDBACK#${userId}` },
+        sk: { S: new Date().toISOString() },
+        rating: { S: rating },
+        ttl: { N: String(Math.floor(Date.now() / 1000) + 90 * 86400) },
+      },
+    })
+  )
 }

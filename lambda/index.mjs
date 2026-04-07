@@ -1,5 +1,6 @@
 import { verifySignature } from './line.mjs'
 import { handleText, handleAudio } from './services/chat.mjs'
+import { handleCommand, handlePostback } from './commands.mjs'
 
 export async function handler(event) {
   const body = event.isBase64Encoded
@@ -19,19 +20,22 @@ export async function handler(event) {
   }
 
   const lineEvent = events[0]
-  if (lineEvent.type !== 'message') {
-    return { statusCode: 200, body: 'Ignored' }
-  }
-
   const userId = lineEvent.source.userId
   const replyToken = lineEvent.replyToken
-  const msg = lineEvent.message
 
   try {
-    if (msg.type === 'text') {
-      await handleText(userId, replyToken, msg.text)
-    } else if (msg.type === 'audio') {
-      await handleAudio(userId, replyToken, msg.id)
+    if (lineEvent.type === 'postback') {
+      await handlePostback(userId, replyToken, lineEvent.postback.data)
+    } else if (lineEvent.type === 'message') {
+      const msg = lineEvent.message
+
+      if (msg.type === 'text' && msg.text.startsWith('@')) {
+        await handleCommand(userId, replyToken, msg.text)
+      } else if (msg.type === 'text') {
+        await handleText(userId, replyToken, msg.text)
+      } else if (msg.type === 'audio') {
+        await handleAudio(userId, replyToken, msg.id)
+      }
     }
   } catch (err) {
     console.error('Handler error:', err)

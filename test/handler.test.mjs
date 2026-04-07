@@ -13,7 +13,16 @@ const mockVerifySignature = jest.fn()
 jest.unstable_mockModule('../lambda/line.mjs', () => ({
   verifySignature: mockVerifySignature,
   replyMessage: jest.fn(),
+  replyWithQuickReply: jest.fn(),
   downloadContent: jest.fn(),
+  showLoadingIndicator: jest.fn().mockResolvedValue(undefined),
+}))
+
+const mockHandleCommand = jest.fn()
+const mockHandlePostback = jest.fn()
+jest.unstable_mockModule('../lambda/commands.mjs', () => ({
+  handleCommand: mockHandleCommand,
+  handlePostback: mockHandlePostback,
 }))
 
 const { handler } = await import('../lambda/index.mjs')
@@ -24,6 +33,8 @@ describe('Lambda handler', () => {
     mockVerifySignature.mockReturnValue(true)
     mockHandleText.mockResolvedValue(undefined)
     mockHandleAudio.mockResolvedValue(undefined)
+    mockHandleCommand.mockResolvedValue(undefined)
+    mockHandlePostback.mockResolvedValue(undefined)
   })
 
   function makeEvent(body, signature = 'valid-sig') {
@@ -83,5 +94,40 @@ describe('Lambda handler', () => {
 
     expect(result.statusCode).toBe(200)
     expect(mockHandleText).not.toHaveBeenCalled()
+  })
+
+  it('routes @-prefixed text to handleCommand', async () => {
+    const body = {
+      events: [
+        {
+          type: 'message',
+          replyToken: 'tok',
+          source: { userId: 'u1' },
+          message: { type: 'text', text: '@隨意聊聊' },
+        },
+      ],
+    }
+
+    await handler(makeEvent(body))
+
+    expect(mockHandleCommand).toHaveBeenCalledWith('u1', 'tok', '@隨意聊聊')
+    expect(mockHandleText).not.toHaveBeenCalled()
+  })
+
+  it('routes postback events to handlePostback', async () => {
+    const body = {
+      events: [
+        {
+          type: 'postback',
+          replyToken: 'tok',
+          source: { userId: 'u1' },
+          postback: { data: 'feedback:good' },
+        },
+      ],
+    }
+
+    await handler(makeEvent(body))
+
+    expect(mockHandlePostback).toHaveBeenCalledWith('u1', 'tok', 'feedback:good')
   })
 })
