@@ -2,7 +2,9 @@ import { verifySignature } from './line.mjs'
 import { handleText, handleAudio } from './services/chat.mjs'
 
 export async function handler(event) {
-  const body = event.body
+  const body = event.isBase64Encoded
+    ? Buffer.from(event.body, 'base64').toString('utf-8')
+    : event.body
   const signature = event.headers?.['x-line-signature'] || ''
 
   if (!verifySignature(body, signature, process.env.LINE_CHANNEL_SECRET)) {
