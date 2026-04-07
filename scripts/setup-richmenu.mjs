@@ -125,22 +125,22 @@ function generateImage() {
   ]
 
   for (const item of items) {
-    // Emoji
-    ctx.font = '72px serif'
+    // Emoji — large and prominent
+    ctx.font = '180px serif'
     ctx.textAlign = 'center'
     ctx.fillStyle = '#ffffff'
-    ctx.fillText(item.emoji, item.cx, H * 0.38)
+    ctx.fillText(item.emoji, item.cx, H * 0.42)
 
-    // Chinese label
-    ctx.font = '42px sans-serif'
+    // Chinese label — bold and readable
+    ctx.font = 'bold 96px sans-serif'
     ctx.fillStyle = '#c4b89a'
-    ctx.fillText(item.label, item.cx, H * 0.58)
+    ctx.fillText(item.label, item.cx, H * 0.68)
 
     // English sub-label
-    ctx.font = '24px sans-serif'
+    ctx.font = '40px sans-serif'
     ctx.fillStyle = 'rgba(196, 184, 154, 0.4)'
     ctx.letterSpacing = '3px'
-    ctx.fillText(item.sub, item.cx, H * 0.72)
+    ctx.fillText(item.sub, item.cx, H * 0.82)
   }
 
   return canvas.toBuffer('image/png')
