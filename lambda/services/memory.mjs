@@ -39,7 +39,9 @@ export async function getContext(userId) {
     ),
   ])
 
+  // ScanIndexForward:false returns newest first; reverse to chronological
   const recentTurns = (turnsRes.Items || [])
+    .reverse()
     .map((item) => ({
       role: item.role.S,
       content: item.content.S,

@@ -37,10 +37,11 @@ describe('memory service', () => {
     })
 
     it('returns recent turns and summary', async () => {
+      // ScanIndexForward:false returns newest first — mock reverse order
       mockSend.mockResolvedValueOnce({
         Items: [
-          { sk: { S: 'TURN#2026-01-01T00:00:00Z#user' }, content: { S: '你好' }, role: { S: 'user' } },
           { sk: { S: 'TURN#2026-01-01T00:00:00Z#asst' }, content: { S: '嗨' }, role: { S: 'assistant' } },
+          { sk: { S: 'TURN#2026-01-01T00:00:00Z#user' }, content: { S: '你好' }, role: { S: 'user' } },
         ],
       })
       mockSend.mockResolvedValueOnce({
