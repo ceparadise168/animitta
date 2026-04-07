@@ -10,12 +10,15 @@ jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({
 }))
 
 const mockVerifySignature = jest.fn()
+const mockReplyMessage = jest.fn()
 jest.unstable_mockModule('../lambda/line.mjs', () => ({
   verifySignature: mockVerifySignature,
-  replyMessage: jest.fn(),
+  replyMessage: mockReplyMessage,
   replyWithQuickReply: jest.fn(),
+  replyWithQuickReplyMessage: jest.fn(),
   downloadContent: jest.fn(),
   showLoadingIndicator: jest.fn().mockResolvedValue(undefined),
+  linkRichMenu: jest.fn().mockResolvedValue(undefined),
 }))
 
 const mockHandleCommand = jest.fn()

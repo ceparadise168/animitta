@@ -18,6 +18,17 @@ export async function downloadContent(messageId) {
   return res.arrayBuffer()
 }
 
+export async function linkRichMenu(userId, richMenuId) {
+  const res = await fetch(
+    `https://api.line.me/v2/bot/user/${userId}/richmenu/${richMenuId}`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}` },
+    }
+  )
+  if (!res.ok) throw new Error(`LINE link rich menu failed: ${res.status}`)
+}
+
 export async function showLoadingIndicator(userId) {
   await fetch('https://api.line.me/v2/bot/chat/loading', {
     method: 'POST',

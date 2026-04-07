@@ -1,6 +1,16 @@
-import { verifySignature } from './line.mjs'
+import { verifySignature, replyMessage, linkRichMenu } from './line.mjs'
 import { handleText, handleAudio } from './services/chat.mjs'
 import { handleCommand, handlePostback, tryHandleFeedbackText } from './commands.mjs'
+
+const WELCOME_MESSAGE =
+  '嗨～我是無相界 🌿\n\n' +
+  '我是一個喜歡讀金剛經的朋友，平時陪人聊聊煩惱、聊聊生活，偶爾也一起想想那些沒有標準答案的問題。\n\n' +
+  '你可以跟我聊任何事——工作壓力、人際關係、人生方向，或者單純好奇佛法在說什麼，都可以。\n\n' +
+  '底下的選單可以隨時用：\n' +
+  '🌿 隨意聊聊 — 我分享一句經文，我們從那裡開始\n' +
+  '🔄 重新開始 — 清空對話記憶，從頭來過\n' +
+  '💬 回饋 — 讓我知道這次聊天有沒有幫上忙\n\n' +
+  '想聊什麼，隨時開口就好 😊'
 
 export async function handler(event) {
   const body = event.isBase64Encoded
@@ -24,7 +34,13 @@ export async function handler(event) {
   const replyToken = lineEvent.replyToken
 
   try {
-    if (lineEvent.type === 'postback') {
+    if (lineEvent.type === 'follow') {
+      // User added bot or unblocked — send welcome + re-link Rich Menu
+      await replyMessage(replyToken, WELCOME_MESSAGE)
+      if (process.env.RICH_MENU_ID) {
+        linkRichMenu(userId, process.env.RICH_MENU_ID).catch(() => {})
+      }
+    } else if (lineEvent.type === 'postback') {
       await handlePostback(userId, replyToken, lineEvent.postback.data)
     } else if (lineEvent.type === 'message') {
       const msg = lineEvent.message

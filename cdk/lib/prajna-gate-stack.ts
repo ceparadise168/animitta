@@ -38,6 +38,7 @@ export class PrajnaGateStack extends cdk.Stack {
         MAX_RECENT_TURNS: process.env.MAX_RECENT_TURNS || '5',
         SUMMARY_THRESHOLD: process.env.SUMMARY_THRESHOLD || '3000',
         CONVERSATION_TTL_DAYS: process.env.CONVERSATION_TTL_DAYS || '30',
+        RICH_MENU_ID: process.env.RICH_MENU_ID || '',
       },
     })
 
