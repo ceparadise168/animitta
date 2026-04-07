@@ -1,6 +1,6 @@
 import { verifySignature } from './line.mjs'
 import { handleText, handleAudio } from './services/chat.mjs'
-import { handleCommand, handlePostback } from './commands.mjs'
+import { handleCommand, handlePostback, tryHandleFeedbackText } from './commands.mjs'
 
 export async function handler(event) {
   const body = event.isBase64Encoded
@@ -32,7 +32,8 @@ export async function handler(event) {
       if (msg.type === 'text' && msg.text.startsWith('@')) {
         await handleCommand(userId, replyToken, msg.text)
       } else if (msg.type === 'text') {
-        await handleText(userId, replyToken, msg.text)
+        const handled = await tryHandleFeedbackText(userId, replyToken, msg.text)
+        if (!handled) await handleText(userId, replyToken, msg.text)
       } else if (msg.type === 'audio') {
         await handleAudio(userId, replyToken, msg.id)
       }

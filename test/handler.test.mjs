@@ -20,9 +20,11 @@ jest.unstable_mockModule('../lambda/line.mjs', () => ({
 
 const mockHandleCommand = jest.fn()
 const mockHandlePostback = jest.fn()
+const mockTryHandleFeedbackText = jest.fn()
 jest.unstable_mockModule('../lambda/commands.mjs', () => ({
   handleCommand: mockHandleCommand,
   handlePostback: mockHandlePostback,
+  tryHandleFeedbackText: mockTryHandleFeedbackText,
 }))
 
 const { handler } = await import('../lambda/index.mjs')
@@ -35,6 +37,7 @@ describe('Lambda handler', () => {
     mockHandleAudio.mockResolvedValue(undefined)
     mockHandleCommand.mockResolvedValue(undefined)
     mockHandlePostback.mockResolvedValue(undefined)
+    mockTryHandleFeedbackText.mockResolvedValue(false)
   })
 
   function makeEvent(body, signature = 'valid-sig') {

@@ -1,5 +1,5 @@
 import { replyMessage, replyWithQuickReply } from './line.mjs'
-import { clearMemory, saveFeedback } from './services/memory.mjs'
+import { clearMemory, saveFeedback, setPendingFeedback, getPendingFeedback, deletePendingFeedback } from './services/memory.mjs'
 
 const SCRIPTURE_STARTERS = [
   { quote: '過去心不可得，現在心不可得，未來心不可得。', hook: '如果三種心都不可得，那現在在想事情的是誰？' },
@@ -10,6 +10,20 @@ const SCRIPTURE_STARTERS = [
   { quote: '如來者，無所從來，亦無所去，故名如來。', hook: '如果沒有來也沒有去，那我們現在在哪裡？' },
   { quote: '若心有住，即為非住。', hook: '聽起來有點繞，你覺得這句在說什麼？' },
 ]
+
+/**
+ * Check if the user's text message is a feedback follow-up.
+ * Returns true if handled, false if it's a normal message.
+ */
+export async function tryHandleFeedbackText(userId, replyToken, text) {
+  const pending = await getPendingFeedback(userId)
+  if (!pending) return false
+
+  await deletePendingFeedback(userId)
+  await saveFeedback(userId, 'good_detail', text)
+  await replyMessage(replyToken, '收到，謝謝你的分享 🙏')
+  return true
+}
 
 export async function handleCommand(userId, replyToken, command) {
   switch (command) {
@@ -32,10 +46,14 @@ export async function handlePostback(userId, replyToken, data) {
   if (data === 'confirm:cancel') {
     return replyMessage(replyToken, '好的，那我們繼續 😊')
   }
-  if (data === 'feedback:good' || data === 'feedback:ok') {
-    const rating = data === 'feedback:good' ? 'good' : 'ok'
-    await saveFeedback(userId, rating)
-    return replyMessage(replyToken, '謝謝你的回饋 🙏')
+  if (data === 'feedback:good') {
+    await saveFeedback(userId, 'good')
+    await setPendingFeedback(userId)
+    return replyMessage(replyToken, '謝謝！方便說一下哪裡有幫助嗎？\n\n（直接打字，或不回也沒關係）')
+  }
+  if (data === 'feedback:ok') {
+    await saveFeedback(userId, 'ok')
+    return replyMessage(replyToken, '好的，謝謝你的回饋 🙏')
   }
 }
 
