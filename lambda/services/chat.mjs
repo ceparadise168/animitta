@@ -51,7 +51,17 @@ function parseSuggestions(response) {
     }
   }
 
-  // 3. Try "三個重點：A、B、C" pattern at the end
+  // 3. Try quoted list "「A、B、C」" anywhere in last 2 lines
+  const tail = lines.slice(-2).join('\n')
+  const quotedList = tail.match(/[「『]([^」』]+[、][^」』]+)[」』]/)
+  if (quotedList) {
+    const items = quotedList[1].split(/[、和與]/).map((s) => s.trim()).filter(Boolean)
+    if (items.length >= 2 && items.length <= 4 && items.every((p) => p.length <= 20)) {
+      return { text: response, suggestions: items }
+    }
+  }
+
+  // 4. Try "三個重點：A、B、C" pattern at the end
   const listMatch = lastLine.match(NATURAL_LIST_RE)
   if (listMatch) {
     const items = listMatch[1].split(/[、和與]/).map((s) => s.replace(/[「」『』]/g, '').trim()).filter(Boolean)
