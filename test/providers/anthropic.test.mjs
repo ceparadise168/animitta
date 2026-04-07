@@ -35,7 +35,7 @@ describe('AnthropicProvider', () => {
       ]
       const result = await provider.chatCompletion(messages)
 
-      expect(result).toBe('回覆')
+      expect(result).toEqual({ text: '回覆', suggestions: [] })
       const callBody = JSON.parse(mockFetch.mock.calls[0][1].body)
       expect(callBody.system).toBe('You are helpful.')
       expect(callBody.messages).toEqual([{ role: 'user', content: '你好' }])

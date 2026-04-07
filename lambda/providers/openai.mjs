@@ -23,11 +23,32 @@ export class OpenAiProvider extends LlmProvider {
         model: this.#chatModel,
         temperature: 0.9,
         messages,
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'reply',
+            strict: true,
+            schema: {
+              type: 'object',
+              properties: {
+                text: { type: 'string', description: '回覆文字' },
+                suggestions: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: '建議回覆按鈕（0-3 個，每個 20 字以內），沒有就給空陣列',
+                },
+              },
+              required: ['text', 'suggestions'],
+              additionalProperties: false,
+            },
+          },
+        },
       }),
     })
     if (!res.ok) throw new Error(`OpenAI chat failed: ${res.status}`)
     const data = await res.json()
-    return data.choices[0].message.content
+    const parsed = JSON.parse(data.choices[0].message.content)
+    return { text: parsed.text, suggestions: parsed.suggestions || [] }
   }
 
   async summarize(existingSummary, turns) {

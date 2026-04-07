@@ -47,17 +47,39 @@ describe('chat service', () => {
   })
 
   describe('handleText', () => {
-    it('gets context, calls LLM, replies, saves turn, and compresses', async () => {
-      mockProvider.chatCompletion.mockResolvedValue('佛曰：**放下**吧')
+    it('replies with plain message when no suggestions', async () => {
+      mockProvider.chatCompletion.mockResolvedValue({
+        text: '佛曰：**放下**吧',
+        suggestions: [],
+      })
 
       await handleText('user1', 'token1', '我好累')
 
       expect(mockGetContext).toHaveBeenCalledWith('user1')
       expect(mockProvider.chatCompletion).toHaveBeenCalled()
-      // Should strip markdown artifacts
       expect(mockReplyMessage).toHaveBeenCalledWith('token1', '佛曰：放下吧')
       expect(mockSaveTurn).toHaveBeenCalledWith('user1', '我好累', '佛曰：放下吧')
       expect(mockCompressOldTurns).toHaveBeenCalledWith('user1', mockProvider)
+    })
+
+    it('replies with quick reply buttons when suggestions present', async () => {
+      mockProvider.chatCompletion.mockResolvedValue({
+        text: '金剛經核心有幾個方向',
+        suggestions: ['空性', '無我', '無住'],
+      })
+
+      await handleText('user1', 'token1', '金剛經核心思想')
+
+      expect(mockReplyWithQuickReplyMessage).toHaveBeenCalledWith(
+        'token1',
+        '金剛經核心有幾個方向',
+        [
+          { label: '空性', text: '空性' },
+          { label: '無我', text: '無我' },
+          { label: '無住', text: '無住' },
+        ]
+      )
+      expect(mockReplyMessage).not.toHaveBeenCalled()
     })
   })
 
@@ -66,7 +88,7 @@ describe('chat service', () => {
       const audioBuffer = new ArrayBuffer(8)
       mockDownloadContent.mockResolvedValue(audioBuffer)
       mockProvider.transcribeAudio.mockResolvedValue('語音內容')
-      mockProvider.chatCompletion.mockResolvedValue('回覆')
+      mockProvider.chatCompletion.mockResolvedValue({ text: '回覆', suggestions: [] })
 
       await handleAudio('user1', 'token1', 'msg123')
 

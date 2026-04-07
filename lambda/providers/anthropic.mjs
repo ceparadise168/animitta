@@ -36,7 +36,15 @@ export class AnthropicProvider extends LlmProvider {
     })
     if (!res.ok) throw new Error(`Anthropic chat failed: ${res.status}`)
     const data = await res.json()
-    return data.content[0].text
+    const raw = data.content[0].text
+    // Try to parse [建議回覆:] format, otherwise return empty suggestions
+    const match = raw.match(/\n*\[建議回覆[:：]\s*(.+)\]\s*$/)
+    if (match) {
+      const text = raw.replace(/\n*\[建議回覆[:：]\s*(.+)\]\s*$/, '').trimEnd()
+      const suggestions = match[1].split('|').map((s) => s.trim()).filter(Boolean).slice(0, 4)
+      return { text, suggestions }
+    }
+    return { text: raw, suggestions: [] }
   }
 
   async summarize(existingSummary, turns) {
