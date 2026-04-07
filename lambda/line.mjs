@@ -18,6 +18,17 @@ export async function downloadContent(messageId) {
   return res.arrayBuffer()
 }
 
+export async function showLoadingIndicator(userId) {
+  await fetch('https://api.line.me/v2/bot/chat/loading', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+    },
+    body: JSON.stringify({ chatId: userId }),
+  })
+}
+
 export async function replyMessage(replyToken, text) {
   const res = await fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',

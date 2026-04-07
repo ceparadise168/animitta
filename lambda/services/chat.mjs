@@ -1,7 +1,7 @@
 import { getContext, saveTurn, compressOldTurns } from './memory.mjs'
 import { getProvider } from '../providers/index.mjs'
 import { buildMessages } from '../prompt.mjs'
-import { replyMessage, downloadContent } from '../line.mjs'
+import { replyMessage, downloadContent, showLoadingIndicator } from '../line.mjs'
 
 function stripMarkdown(text) {
   return text.replace(/[*#_~`>]/g, '')
@@ -9,6 +9,9 @@ function stripMarkdown(text) {
 
 export async function handleText(userId, replyToken, userText) {
   const provider = getProvider()
+
+  // Show "typing..." indicator while LLM thinks
+  showLoadingIndicator(userId).catch(() => {})
 
   const { summary, recentTurns } = await getContext(userId)
 

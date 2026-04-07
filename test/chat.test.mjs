@@ -20,6 +20,7 @@ jest.unstable_mockModule('../lambda/line.mjs', () => ({
   replyMessage: mockReplyMessage,
   downloadContent: mockDownloadContent,
   verifySignature: jest.fn(),
+  showLoadingIndicator: jest.fn().mockResolvedValue(undefined),
 }))
 
 const { handleText, handleAudio } = await import(
