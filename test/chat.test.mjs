@@ -16,8 +16,10 @@ jest.unstable_mockModule('../lambda/providers/index.mjs', () => ({
 
 const mockReplyMessage = jest.fn()
 const mockDownloadContent = jest.fn()
+const mockReplyWithQuickReplyMessage = jest.fn()
 jest.unstable_mockModule('../lambda/line.mjs', () => ({
   replyMessage: mockReplyMessage,
+  replyWithQuickReplyMessage: mockReplyWithQuickReplyMessage,
   downloadContent: mockDownloadContent,
   verifySignature: jest.fn(),
   showLoadingIndicator: jest.fn().mockResolvedValue(undefined),
@@ -41,6 +43,7 @@ describe('chat service', () => {
     mockSaveTurn.mockResolvedValue(undefined)
     mockCompressOldTurns.mockResolvedValue(undefined)
     mockReplyMessage.mockResolvedValue(undefined)
+    mockReplyWithQuickReplyMessage.mockResolvedValue(undefined)
   })
 
   describe('handleText', () => {
