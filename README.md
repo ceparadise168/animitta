@@ -1,6 +1,8 @@
-# prajna-gate 般若之門
+# Animitta 無相界
 
 A LINE Bot powered by Diamond Sutra (金剛經) wisdom. Acts as a wise mentor — blending ancient Buddhist scripture with practical life advice, management insight, and philosophical dialogue.
+
+*Animitta (अनिमित्त)* — Sanskrit for "signless, without marks." In the Diamond Sutra, all forms are illusory; in physics, all light vanishes at the event horizon. This bot lives at that boundary.
 
 ## What It Does
 
@@ -48,8 +50,8 @@ LINE App → API Gateway (Function URL) → Lambda (Node.js 22.x) → OpenAI / A
 
 ```bash
 # Clone and install
-git clone https://github.com/anthropics/prajna-gate.git
-cd prajna-gate
+git clone https://github.com/ceparadise168/animitta.git
+cd animitta
 npm install
 
 # Configure
