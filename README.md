@@ -2,6 +2,8 @@
 
 A LINE Bot powered by Diamond Sutra (金剛經) wisdom. Acts as a wise mentor — blending ancient Buddhist scripture with practical life advice, management insight, and philosophical dialogue.
 
+> 凡所有相，皆是虛妄；凡所有光，皆入視界。
+
 *Animitta (अनिमित्त)* — Sanskrit for "signless, without marks." In the Diamond Sutra, all forms are illusory; in physics, all light vanishes at the event horizon. This bot lives at that boundary.
 
 ## What It Does
