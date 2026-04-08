@@ -3,3 +3,4 @@ cdk.out/
 .env
 *.js.map
 *.d.ts
+.playwright-mcp/

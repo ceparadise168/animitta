@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>無相界 Rich Menu Design</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@300;400;500;600;700&family=Noto+Sans+TC:wght@300;400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a1a1a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Noto Sans TC', sans-serif;
+    color: #e8e0d4;
+    padding: 40px;
+  }
+
+  h1 {
+    font-family: 'Noto Serif TC', serif;
+    font-weight: 300;
+    font-size: 24px;
+    margin-bottom: 8px;
+    letter-spacing: 4px;
+    color: #c4b89a;
+  }
+
+  .subtitle {
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 32px;
+    letter-spacing: 1px;
+  }
+
+  /* ---- Rich Menu Canvas (2500 x 843 scaled down) ---- */
+  .richmenu-wrapper {
+    width: 750px; /* 2500 / 3.33 */
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+
+  .richmenu {
+    width: 100%;
+    aspect-ratio: 2500 / 843;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    position: relative;
+    overflow: hidden;
+
+    /* Deep ink wash background */
+    background:
+      radial-gradient(ellipse at 20% 50%, rgba(62, 55, 45, 0.8) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 40%, rgba(55, 50, 42, 0.6) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 80%, rgba(45, 40, 35, 0.4) 0%, transparent 40%),
+      linear-gradient(170deg, #2a2520 0%, #1e1b17 40%, #252119 70%, #2a2520 100%);
+  }
+
+  /* Subtle ink texture overlay */
+  .richmenu::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    opacity: 0.5;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Subtle gold accent line at top */
+  .richmenu::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(196, 184, 154, 0.3), transparent);
+    z-index: 2;
+  }
+
+  .menu-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    z-index: 3;
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+
+  .menu-item:hover {
+    background: rgba(196, 184, 154, 0.06);
+  }
+
+  .menu-item:hover .item-icon {
+    transform: translateY(-2px);
+    opacity: 1;
+  }
+
+  /* Vertical dividers */
+  .menu-item:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 25%;
+    height: 50%;
+    width: 1px;
+    background: linear-gradient(180deg, transparent, rgba(196, 184, 154, 0.15), transparent);
+  }
+
+  .item-icon {
+    font-size: 28px;
+    opacity: 0.85;
+    transition: all 0.3s ease;
+    filter: grayscale(20%);
+  }
+
+  .item-label {
+    font-family: 'Noto Serif TC', serif;
+    font-weight: 400;
+    font-size: 16px;
+    letter-spacing: 3px;
+    color: #c4b89a;
+  }
+
+  .item-sublabel {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    color: rgba(196, 184, 154, 0.4);
+    font-weight: 300;
+  }
+
+  /* ---- Option variants ---- */
+  .options-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    margin-top: 48px;
+    width: 750px;
+  }
+
+  .option-card {
+    background: #222;
+    border-radius: 8px;
+    padding: 24px;
+    border: 1px solid #333;
+  }
+
+  .option-card h3 {
+    font-family: 'Noto Serif TC', serif;
+    font-weight: 400;
+    font-size: 14px;
+    color: #c4b89a;
+    margin-bottom: 16px;
+    letter-spacing: 2px;
+  }
+
+  /* Option B: Lighter, warmer */
+  .richmenu-b {
+    background:
+      radial-gradient(ellipse at 30% 60%, rgba(139, 115, 85, 0.15) 0%, transparent 60%),
+      radial-gradient(ellipse at 70% 30%, rgba(139, 115, 85, 0.1) 0%, transparent 50%),
+      linear-gradient(175deg, #3a342c 0%, #2e2924 50%, #342f28 100%);
+  }
+
+  .richmenu-b .item-label {
+    color: #d4c5a9;
+  }
+
+  .richmenu-b .item-sublabel {
+    color: rgba(212, 197, 169, 0.4);
+  }
+
+  .richmenu-b .menu-item:not(:last-child)::after {
+    background: linear-gradient(180deg, transparent, rgba(212, 197, 169, 0.12), transparent);
+  }
+
+  /* ---- Phone mockup ---- */
+  .phone-section {
+    margin-top: 56px;
+    text-align: center;
+  }
+
+  .phone-section h2 {
+    font-family: 'Noto Serif TC', serif;
+    font-weight: 300;
+    font-size: 18px;
+    color: #888;
+    margin-bottom: 24px;
+    letter-spacing: 3px;
+  }
+
+  .phone-frame {
+    width: 375px;
+    height: 680px;
+    background: #0b0b0b;
+    border-radius: 40px;
+    padding: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 2px #333;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .phone-screen {
+    width: 100%;
+    height: 100%;
+    background: #f5f0ea;
+    border-radius: 30px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .phone-header {
+    background: #4a8b5c;
+    color: white;
+    padding: 48px 16px 12px;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 1px;
+    text-align: center;
+  }
+
+  .phone-chat {
+    flex: 1;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .chat-bubble {
+    max-width: 75%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .chat-bubble.bot {
+    background: white;
+    color: #333;
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  }
+
+  .chat-bubble.user {
+    background: #4a8b5c;
+    color: white;
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+  }
+
+  .phone-richmenu {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    background:
+      radial-gradient(ellipse at 20% 50%, rgba(62, 55, 45, 0.8) 0%, transparent 60%),
+      linear-gradient(170deg, #2a2520 0%, #1e1b17 40%, #252119 70%, #2a2520 100%);
+    border-top: 1px solid rgba(196, 184, 154, 0.15);
+  }
+
+  .phone-menu-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 14px 8px;
+    gap: 5px;
+    position: relative;
+  }
+
+  .phone-menu-item:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 25%;
+    height: 50%;
+    width: 1px;
+    background: linear-gradient(180deg, transparent, rgba(196, 184, 154, 0.15), transparent);
+  }
+
+  .phone-menu-item .icon { font-size: 18px; }
+
+  .phone-menu-item .label {
+    font-family: 'Noto Serif TC', serif;
+    font-size: 11px;
+    color: #c4b89a;
+    letter-spacing: 2px;
+  }
+
+  /* Quick Reply preview */
+  .quick-reply-bar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px 12px;
+    overflow-x: auto;
+    background: #f5f0ea;
+  }
+
+  .quick-reply-btn {
+    flex-shrink: 0;
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: 1px solid #d4c5a9;
+    background: white;
+    font-size: 12px;
+    color: #5a4e3a;
+    font-family: 'Noto Sans TC', sans-serif;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<h1>無 相 界</h1>
+<p class="subtitle">RICH MENU DESIGN — 2500 × 843px</p>
+
+<!-- Main design -->
+<div class="richmenu-wrapper">
+  <div class="richmenu">
+    <div class="menu-item">
+      <span class="item-icon">🌿</span>
+      <span class="item-label">隨意聊聊</span>
+      <span class="item-sublabel">EXPLORE</span>
+    </div>
+    <div class="menu-item">
+      <span class="item-icon">🔄</span>
+      <span class="item-label">重新開始</span>
+      <span class="item-sublabel">RESTART</span>
+    </div>
+    <div class="menu-item">
+      <span class="item-icon">💬</span>
+      <span class="item-label">回饋</span>
+      <span class="item-sublabel">FEEDBACK</span>
+    </div>
+  </div>
+</div>
+
+<!-- Phone mockup with context -->
+<div class="phone-section">
+  <h2>在 LINE 中的樣子</h2>
+
+  <div class="phone-frame">
+    <div class="phone-screen">
+      <div class="phone-header">無相界</div>
+
+      <div class="phone-chat">
+        <div class="chat-bubble user">我覺得最近壓力好大</div>
+        <div class="chat-bubble bot">嗯，聽起來你扛了一陣子了。<br><br>是那種身體的累，還是心裡覺得撐不住的那種？</div>
+        <div class="chat-bubble user">心裡的，覺得看不到盡頭</div>
+        <div class="chat-bubble bot">金剛經有一句：「過去心不可得，現在心不可得，未來心不可得。」<br><br>聽起來有點奇怪，但你覺得——你現在的「看不到盡頭」，是事實，還是疲憊時冒出的想法？</div>
+      </div>
+
+      <!-- Quick Reply example -->
+      <div class="quick-reply-bar">
+        <div class="quick-reply-btn">👍 有收穫</div>
+        <div class="quick-reply-btn">👋 還好</div>
+      </div>
+
+      <!-- Rich Menu -->
+      <div class="phone-richmenu">
+        <div class="phone-menu-item">
+          <span class="icon">🌿</span>
+          <span class="label">隨意聊聊</span>
+        </div>
+        <div class="phone-menu-item">
+          <span class="icon">🔄</span>
+          <span class="label">重新開始</span>
+        </div>
+        <div class="phone-menu-item">
+          <span class="icon">💬</span>
+          <span class="label">回饋</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
