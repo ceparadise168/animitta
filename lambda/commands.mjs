@@ -12,14 +12,9 @@ const SCRIPTURE_STARTERS = [
 ]
 
 const ABOUT_MESSAGE =
-  '關於無相界 🌿\n\n' +
-  '這是我在昇恆昌公司工作時，受到公司理念啟發寫的小專案。\n\n' +
-  '寫它的初衷很單純——希望讓更多人有機會接觸金剛經，也能有個地方隨意聊聊、或是分享煩惱。\n\n' +
-  '目前由我獨立出資維護。如果你覺得這裡對你有幫助，歡迎：\n\n' +
-  '🤝 分享給身邊的人\n' +
-  '💛 隨喜捐款，至你想支持的慈善團體\n\n' +
-  '有任何建議或想法，都歡迎寫信給我：\n' +
-  'erictu.engineer@gmail.com'
+  '這個聊天機器人源自我在昇恆昌任職期間，受公司理念啟發而萌生的一個小專案，希望能讓更多人認識《金剛經》，也能在這裡聊聊天、說說心裡的煩惱。\n\n' +
+  '目前由我個人自費維護。如果你覺得有幫助，歡迎分享給朋友；若想將這份善意延續下去，也歡迎隨喜捐款給你支持的慈善團體。\n\n' +
+  '有任何建議，都歡迎寫信給我：erictu.engineer@gmail.com'
 
 export async function handleCommand(userId, replyToken, command) {
   switch (command) {
