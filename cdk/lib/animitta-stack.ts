@@ -4,12 +4,12 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb'
 import * as path from 'path'
 import { Construct } from 'constructs'
 
-export class PrajnaGateStack extends cdk.Stack {
+export class AnimittaStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props)
 
     const table = new dynamodb.Table(this, 'ConversationsTable', {
-      tableName: process.env.MEMORY_TABLE_NAME || 'prajna-gate-conversations',
+      tableName: process.env.MEMORY_TABLE_NAME || 'animitta-conversations',
       partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -17,8 +17,8 @@ export class PrajnaGateStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     })
 
-    const fn = new lambda.Function(this, 'PrajnaGateHandler', {
-      functionName: 'prajna-gate',
+    const fn = new lambda.Function(this, 'AnimittaHandler', {
+      functionName: 'animitta',
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: 'index.handler',
       code: lambda.Code.fromAsset(path.resolve(__dirname, '../../lambda')),
@@ -38,6 +38,7 @@ export class PrajnaGateStack extends cdk.Stack {
         MAX_RECENT_TURNS: process.env.MAX_RECENT_TURNS || '5',
         SUMMARY_THRESHOLD: process.env.SUMMARY_THRESHOLD || '3000',
         CONVERSATION_TTL_DAYS: process.env.CONVERSATION_TTL_DAYS || '30',
+        SESSION_IDLE_HOURS: process.env.SESSION_IDLE_HOURS || '2',
         RICH_MENU_ID: process.env.RICH_MENU_ID || '',
       },
     })

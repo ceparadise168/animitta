@@ -82,10 +82,10 @@ Key variables:
 ## Project Structure
 
 ```
-prajna-gate/
+animitta/
 ├── cdk/                    # AWS CDK infrastructure
 │   ├── bin/app.ts
-│   └── lib/prajna-gate-stack.ts
+│   └── lib/animitta-stack.ts
 ├── lambda/
 │   ├── index.mjs           # Lambda handler (routing)
 │   ├── line.mjs            # LINE API helpers

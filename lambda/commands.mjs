@@ -29,8 +29,8 @@ export async function handleCommand(userId, replyToken, command) {
   switch (command) {
     case '@隨意聊聊':
       return handleCasualChat(replyToken)
-    case '@重新開始':
-      return handleRestart(replyToken)
+    case '@清除記憶':
+      return handleClearMemory(replyToken)
     case '@回饋':
       return handleFeedbackPrompt(replyToken)
     default:
@@ -41,7 +41,7 @@ export async function handleCommand(userId, replyToken, command) {
 export async function handlePostback(userId, replyToken, data) {
   if (data === 'confirm:clear') {
     await clearMemory(userId)
-    return replyMessage(replyToken, '記憶已清空，我們重新開始吧 ✨')
+    return replyMessage(replyToken, '好的，記憶已清空 ✨ 我們從這裡重新開始')
   }
   if (data === 'confirm:cancel') {
     return replyMessage(replyToken, '好的，那我們繼續 😊')
@@ -63,10 +63,10 @@ async function handleCasualChat(replyToken) {
   return replyMessage(replyToken, text)
 }
 
-async function handleRestart(replyToken) {
+async function handleClearMemory(replyToken) {
   return replyWithQuickReply(
     replyToken,
-    '確定要重新開始嗎？之前的對話記憶會清空喔',
+    '確定要清除記憶嗎？這次之後我就會忘掉我們之前所有的對話喔',
     [
       { label: '確定', data: 'confirm:clear' },
       { label: '取消', data: 'confirm:cancel' },

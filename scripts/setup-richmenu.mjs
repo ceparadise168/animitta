@@ -55,7 +55,7 @@ async function createRichMenu() {
         },
         {
           bounds: { x: 833, y: 0, width: 834, height: 843 },
-          action: { type: 'message', text: '@重新開始' },
+          action: { type: 'message', text: '@清除記憶' },
         },
         {
           bounds: { x: 1667, y: 0, width: 833, height: 843 },
@@ -120,7 +120,7 @@ function generateImage() {
   // Menu items
   const items = [
     { emoji: '🌿', label: '隨意聊聊', sub: 'EXPLORE', cx: 416 },
-    { emoji: '🔄', label: '重新開始', sub: 'RESTART', cx: 1250 },
+    { emoji: '🔄', label: '清除記憶', sub: 'CLEAR', cx: 1250 },
     { emoji: '💬', label: '回饋', sub: 'FEEDBACK', cx: 2083 },
   ]
 
