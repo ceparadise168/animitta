@@ -41,7 +41,11 @@ export async function handlePostback(userId, replyToken, data) {
 
 async function handleCasualChat(replyToken) {
   const pick = SCRIPTURE_STARTERS[Math.floor(Math.random() * SCRIPTURE_STARTERS.length)]
-  const text = `嗨～今天想跟你分享一句金剛經：\n\n「${pick.quote}」\n\n${pick.hook}`
+  const text =
+    `嗨～今天想跟你分享一句金剛經：\n\n` +
+    `「${pick.quote}」\n\n` +
+    `${pick.hook}\n\n` +
+    `（提示：你可以點左下角的圖示切換到文字輸入框喔！）`
   return replyMessage(replyToken, text)
 }
 
