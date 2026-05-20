@@ -3,7 +3,6 @@ import {
   QueryCommand,
   GetItemCommand,
   PutItemCommand,
-  DeleteItemCommand,
   BatchWriteItemCommand,
 } from '@aws-sdk/client-dynamodb'
 
@@ -262,52 +261,3 @@ export async function clearMemory(userId) {
   }
 }
 
-/**
- * Store user feedback.
- */
-export async function saveFeedback(userId, rating, detail = null) {
-  const item = {
-    pk: { S: `FEEDBACK#${userId}` },
-    sk: { S: new Date().toISOString() },
-    rating: { S: rating },
-    ttl: { N: String(Math.floor(Date.now() / 1000) + 90 * 86400) },
-  }
-  if (detail) item.detail = { S: detail }
-  await client.send(new PutItemCommand({ TableName: TABLE, Item: item }))
-}
-
-/**
- * Set a short-lived flag indicating we're waiting for feedback text.
- * TTL: 5 minutes (if user doesn't reply, flag auto-expires).
- */
-export async function setPendingFeedback(userId) {
-  await client.send(
-    new PutItemCommand({
-      TableName: TABLE,
-      Item: {
-        pk: { S: `PENDING_FB#${userId}` },
-        sk: { S: 'FLAG' },
-        ttl: { N: String(Math.floor(Date.now() / 1000) + 300) },
-      },
-    })
-  )
-}
-
-export async function getPendingFeedback(userId) {
-  const res = await client.send(
-    new GetItemCommand({
-      TableName: TABLE,
-      Key: { pk: { S: `PENDING_FB#${userId}` }, sk: { S: 'FLAG' } },
-    })
-  )
-  return res.Item ? true : false
-}
-
-export async function deletePendingFeedback(userId) {
-  await client.send(
-    new DeleteItemCommand({
-      TableName: TABLE,
-      Key: { pk: { S: `PENDING_FB#${userId}` }, sk: { S: 'FLAG' } },
-    })
-  )
-}

@@ -1,6 +1,6 @@
 import { verifySignature, replyMessage, linkRichMenu } from './line.mjs'
 import { handleText, handleAudio } from './services/chat.mjs'
-import { handleCommand, handlePostback, tryHandleFeedbackText } from './commands.mjs'
+import { handleCommand, handlePostback } from './commands.mjs'
 
 const WELCOME_MESSAGE =
   '嗨～我是無相界 🌿\n\n' +
@@ -9,7 +9,7 @@ const WELCOME_MESSAGE =
   '底下的選單可以隨時用：\n' +
   '🌿 隨意聊聊 — 我分享一句經文，我們從那裡開始\n' +
   '🔄 清除記憶 — 把這之前的對話清掉，從零開始聊\n' +
-  '💬 回饋 — 讓我知道這次聊天有沒有幫上忙\n\n' +
+  '📖 關於 — 這個專案是什麼、為什麼存在\n\n' +
   '想聊什麼，隨時開口就好 😊'
 
 export async function handler(event) {
@@ -48,8 +48,7 @@ export async function handler(event) {
       if (msg.type === 'text' && msg.text.startsWith('@')) {
         await handleCommand(userId, replyToken, msg.text)
       } else if (msg.type === 'text') {
-        const handled = await tryHandleFeedbackText(userId, replyToken, msg.text)
-        if (!handled) await handleText(userId, replyToken, msg.text)
+        await handleText(userId, replyToken, msg.text)
       } else if (msg.type === 'audio') {
         await handleAudio(userId, replyToken, msg.id)
       }

@@ -59,7 +59,7 @@ async function createRichMenu() {
         },
         {
           bounds: { x: 1667, y: 0, width: 833, height: 843 },
-          action: { type: 'message', text: '@回饋' },
+          action: { type: 'message', text: '@關於' },
         },
       ],
     }),
@@ -121,7 +121,7 @@ function generateImage() {
   const items = [
     { emoji: '🌿', label: '隨意聊聊', sub: 'EXPLORE', cx: 416 },
     { emoji: '🔄', label: '清除記憶', sub: 'CLEAR', cx: 1250 },
-    { emoji: '💬', label: '回饋', sub: 'FEEDBACK', cx: 2083 },
+    { emoji: '📖', label: '關於', sub: 'ABOUT', cx: 2083 },
   ]
 
   for (const item of items) {

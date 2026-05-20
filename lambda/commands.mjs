@@ -1,5 +1,5 @@
 import { replyMessage, replyWithQuickReply } from './line.mjs'
-import { clearMemory, saveFeedback, setPendingFeedback, getPendingFeedback, deletePendingFeedback } from './services/memory.mjs'
+import { clearMemory } from './services/memory.mjs'
 
 const SCRIPTURE_STARTERS = [
   { quote: '過去心不可得，現在心不可得，未來心不可得。', hook: '如果三種心都不可得，那現在在想事情的是誰？' },
@@ -11,19 +11,15 @@ const SCRIPTURE_STARTERS = [
   { quote: '若心有住，即為非住。', hook: '聽起來有點繞，你覺得這句在說什麼？' },
 ]
 
-/**
- * Check if the user's text message is a feedback follow-up.
- * Returns true if handled, false if it's a normal message.
- */
-export async function tryHandleFeedbackText(userId, replyToken, text) {
-  const pending = await getPendingFeedback(userId)
-  if (!pending) return false
-
-  await deletePendingFeedback(userId)
-  await saveFeedback(userId, 'good_detail', text)
-  await replyMessage(replyToken, '收到，謝謝你的分享 🙏')
-  return true
-}
+const ABOUT_MESSAGE =
+  '關於無相界 🌿\n\n' +
+  '這是我在昇恆昌公司工作時，受到公司理念啟發寫的小專案。\n\n' +
+  '寫它的初衷很單純——希望讓更多人有機會接觸金剛經，也能有個地方隨意聊聊、或是分享煩惱。\n\n' +
+  '目前由我獨立出資維護。如果你覺得這裡對你有幫助，歡迎：\n\n' +
+  '🤝 分享給身邊的人\n' +
+  '💛 隨喜捐款，至你想支持的慈善團體\n\n' +
+  '有任何建議或想法，都歡迎寫信給我：\n' +
+  'erictu.engineer@gmail.com'
 
 export async function handleCommand(userId, replyToken, command) {
   switch (command) {
@@ -31,8 +27,8 @@ export async function handleCommand(userId, replyToken, command) {
       return handleCasualChat(replyToken)
     case '@清除記憶':
       return handleClearMemory(replyToken)
-    case '@回饋':
-      return handleFeedbackPrompt(replyToken)
+    case '@關於':
+      return replyMessage(replyToken, ABOUT_MESSAGE)
     default:
       return false
   }
@@ -45,15 +41,6 @@ export async function handlePostback(userId, replyToken, data) {
   }
   if (data === 'confirm:cancel') {
     return replyMessage(replyToken, '好的，那我們繼續 😊')
-  }
-  if (data === 'feedback:good') {
-    await saveFeedback(userId, 'good')
-    await setPendingFeedback(userId)
-    return replyMessage(replyToken, '謝謝！方便說一下哪裡有幫助嗎？\n\n（直接打字，或不回也沒關係）')
-  }
-  if (data === 'feedback:ok') {
-    await saveFeedback(userId, 'ok')
-    return replyMessage(replyToken, '好的，謝謝你的回饋 🙏')
   }
 }
 
@@ -70,17 +57,6 @@ async function handleClearMemory(replyToken) {
     [
       { label: '確定', data: 'confirm:clear' },
       { label: '取消', data: 'confirm:cancel' },
-    ]
-  )
-}
-
-async function handleFeedbackPrompt(replyToken) {
-  return replyWithQuickReply(
-    replyToken,
-    '這次聊天覺得如何？',
-    [
-      { label: '👍 有收穫', data: 'feedback:good' },
-      { label: '👋 還好', data: 'feedback:ok' },
     ]
   )
 }
