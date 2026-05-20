@@ -56,8 +56,8 @@ async function handleClearMemory(replyToken) {
     replyToken,
     '確定要清除記憶嗎？這次之後我就會忘掉我們之前所有的對話喔',
     [
-      { label: '確定', data: 'confirm:clear' },
-      { label: '取消', data: 'confirm:cancel' },
+      { label: '確定', data: 'confirm:clear', inputOption: 'openKeyboard' },
+      { label: '取消', data: 'confirm:cancel', inputOption: 'openKeyboard' },
     ]
   )
 }

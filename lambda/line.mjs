@@ -82,6 +82,7 @@ export async function replyWithQuickReply(replyToken, text, items) {
                 label: item.label,
                 data: item.data,
                 displayText: item.label,
+                ...(item.inputOption && { inputOption: item.inputOption }),
               },
             })),
           },
