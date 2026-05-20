@@ -30,6 +30,9 @@ export async function handleCommand(userId, replyToken, command) {
 }
 
 export async function handlePostback(userId, replyToken, data) {
+  if (data === 'action=casual_chat') {
+    return handleCasualChat(replyToken)
+  }
   if (data === 'confirm:clear') {
     await clearMemory(userId)
     return replyMessage(replyToken, '好的，記憶已清空 ✨ 我們從這裡重新開始')
@@ -44,8 +47,7 @@ async function handleCasualChat(replyToken) {
   const text =
     `嗨～今天想跟你分享一句金剛經：\n\n` +
     `「${pick.quote}」\n\n` +
-    `${pick.hook}\n\n` +
-    `想繼續聊聊的話，可以點左下角的圖示，切換成文字輸入喔。`
+    `${pick.hook}`
   return replyMessage(replyToken, text)
 }
 

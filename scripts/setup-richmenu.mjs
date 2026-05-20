@@ -51,7 +51,12 @@ async function createRichMenu() {
       areas: [
         {
           bounds: { x: 0, y: 0, width: 833, height: 843 },
-          action: { type: 'message', text: '@隨意聊聊' },
+          action: {
+            type: 'postback',
+            data: 'action=casual_chat',
+            displayText: '隨意聊聊',
+            inputOption: 'openKeyboard',
+          },
         },
         {
           bounds: { x: 833, y: 0, width: 834, height: 843 },
