@@ -45,7 +45,7 @@ async function handleCasualChat(replyToken) {
     `嗨～今天想跟你分享一句金剛經：\n\n` +
     `「${pick.quote}」\n\n` +
     `${pick.hook}\n\n` +
-    `（提示：你可以點左下角的圖示切換到文字輸入框喔！）`
+    `想繼續聊聊的話，可以點左下角的圖示，切換成文字輸入喔。`
   return replyMessage(replyToken, text)
 }
 
