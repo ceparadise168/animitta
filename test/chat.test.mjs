@@ -3,10 +3,12 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals'
 const mockGetContext = jest.fn()
 const mockSaveTurn = jest.fn()
 const mockCompressOldTurns = jest.fn()
+const mockArchiveSession = jest.fn()
 jest.unstable_mockModule('../lambda/services/memory.mjs', () => ({
   getContext: mockGetContext,
   saveTurn: mockSaveTurn,
   compressOldTurns: mockCompressOldTurns,
+  archiveSession: mockArchiveSession,
 }))
 
 const mockGetProvider = jest.fn()
@@ -80,6 +82,20 @@ describe('chat service', () => {
         ]
       )
       expect(mockReplyMessage).not.toHaveBeenCalled()
+    })
+
+    it('keeps quick reply labels within LINE limits while preserving full text', async () => {
+      const longSuggestion = '這是一個超過二十個字很多很多的建議選項應該被截短'
+      mockProvider.chatCompletion.mockResolvedValue({
+        text: '可以從這裡開始',
+        suggestions: [longSuggestion],
+      })
+
+      await handleText('user1', 'token1', '我想聊聊')
+
+      const items = mockReplyWithQuickReplyMessage.mock.calls[0][2]
+      expect(items[0].label.length).toBeLessThanOrEqual(20)
+      expect(items[0].text).toBe(longSuggestion)
     })
   })
 

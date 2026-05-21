@@ -92,3 +92,39 @@ export async function replyWithQuickReply(replyToken, text, items) {
   })
   if (!res.ok) throw new Error(`LINE quick reply failed: ${res.status}`)
 }
+
+/**
+ * Reply with text-message Quick Reply buttons.
+ * @param {string} replyToken
+ * @param {string} text
+ * @param {Array<{label: string, text: string}>} items
+ */
+export async function replyWithQuickReplyMessage(replyToken, text, items) {
+  const res = await fetch('https://api.line.me/v2/bot/message/reply', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+    },
+    body: JSON.stringify({
+      replyToken,
+      messages: [
+        {
+          type: 'text',
+          text,
+          quickReply: {
+            items: items.map((item) => ({
+              type: 'action',
+              action: {
+                type: 'message',
+                label: item.label,
+                text: item.text,
+              },
+            })),
+          },
+        },
+      ],
+    }),
+  })
+  if (!res.ok) throw new Error(`LINE quick reply message failed: ${res.status}`)
+}

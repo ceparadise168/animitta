@@ -53,11 +53,25 @@ describe('SYSTEM_PROMPT', () => {
   })
 
   it('contains anti-hallucination rules for scripture', () => {
-    expect(SYSTEM_PROMPT).toContain('逐字來自經文庫')
+    expect(SYSTEM_PROMPT).toContain('加引號的引用必須逐字來自經文庫')
   })
 
-  it('contains conditional scripture usage rules', () => {
-    expect(SYSTEM_PROMPT).toContain('在以下情境使用經文')
-    expect(SYSTEM_PROMPT).toContain('在以下情境不使用經文')
+  it('positions the product as user-first conversation, not image performance', () => {
+    expect(SYSTEM_PROMPT).toContain('自在對話優先')
+    expect(SYSTEM_PROMPT).toContain('先回到使用者正在求什麼')
+    expect(SYSTEM_PROMPT).toContain('金剛經是底色，不是每次都要端出來')
+    expect(SYSTEM_PROMPT).not.toContain('最核心紀律 — Image-first')
+    expect(SYSTEM_PROMPT).not.toContain('你不是來照顧人的、是給畫面的人')
+  })
+
+  it('treats light emotional disclosure as a mode switch to ordinary presence', () => {
+    expect(SYSTEM_PROMPT).toContain('使用者說「煩」「累」「卡」')
+    expect(SYSTEM_PROMPT).toContain('第一件事不是寫出好看的比喻')
+    expect(SYSTEM_PROMPT).toContain('先承認他正在煩')
+  })
+
+  it('keeps scripture conditional and behind the conversation', () => {
+    expect(SYSTEM_PROMPT).toContain('適合引經文')
+    expect(SYSTEM_PROMPT).toContain('不適合引經文')
   })
 })

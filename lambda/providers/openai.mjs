@@ -27,7 +27,7 @@ export class OpenAiProvider extends LlmProvider {
     })
     if (!res.ok) throw new Error(`OpenAI chat failed: ${res.status}`)
     const data = await res.json()
-    return { text: data.choices[0].message.content }
+    return parseChatContent(data.choices[0].message.content)
   }
 
   async summarize(existingSummary, turns) {
@@ -90,4 +90,21 @@ export class OpenAiProvider extends LlmProvider {
     const data = await res.json()
     return data.text || '無法識別音頻'
   }
+}
+
+function parseChatContent(content) {
+  try {
+    const parsed = JSON.parse(content)
+    if (parsed && typeof parsed.text === 'string') {
+      return {
+        text: parsed.text,
+        suggestions: Array.isArray(parsed.suggestions)
+          ? parsed.suggestions.filter((item) => typeof item === 'string')
+          : [],
+      }
+    }
+  } catch {
+    // Plain text responses are valid; quick replies are optional.
+  }
+  return { text: content, suggestions: [] }
 }

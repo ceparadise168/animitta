@@ -1,18 +1,17 @@
 import { replyMessage, replyWithQuickReply } from './line.mjs'
 import { clearMemory } from './services/memory.mjs'
 
-const SCRIPTURE_STARTERS = [
-  { quote: '過去心不可得，現在心不可得，未來心不可得。', hook: '如果三種心都不可得，那現在在想事情的是誰？' },
-  { quote: '凡所有相，皆是虛妄。', hook: '你今天有沒有看到什麼「相」，是你很想抓住的？' },
-  { quote: '菩薩應無所住而生其心。', hook: '你覺得你的心，最近住在哪裡？' },
-  { quote: '一切有為法，如夢幻泡影，如露亦如電，應作如是觀。', hook: '如果人生是一場夢，你最想在夢裡做什麼？' },
-  { quote: '若菩薩不住相布施，其福德不可思量。', hook: '你最近有沒有做過什麼事，是不求回報但做完很開心的？' },
-  { quote: '如來者，無所從來，亦無所去，故名如來。', hook: '如果沒有來也沒有去，那我們現在在哪裡？' },
-  { quote: '若心有住，即為非住。', hook: '聽起來有點繞，你覺得這句在說什麼？' },
+const CASUAL_CHAT_STARTERS = [
+  '嗨，這裡可以很隨意\n\n你可以講一件煩事、一個卡住的念頭，或問我一句金剛經。不用整理，直接丟一句現在最佔位置的話就好',
+  '今天不用從經文開始也可以\n\n想抒發、想問事、想聊金剛經，都行。你先照原本腦袋裡的樣子講，不用修句子',
+  '我在\n\n可以聊日常，也可以聊那些沒有標準答案的事。金剛經先放旁邊，需要的時候再拿出來就好',
+  '如果你想聽一句金剛經，我會想到：「過去心不可得、現在心不可得、未來心不可得。」\n\n不用急著懂它。你也可以只說說，今天哪個念頭一直回來',
+  '隨意聊聊就從一句話開始\n\n最近讓你停住的，是一件事、一個人，還是一個反覆冒出來的念頭',
 ]
 
 const ABOUT_MESSAGE =
-  '這個聊天機器人源自我在昇恆昌任職期間，受公司理念啟發而萌生的一個小專案，希望能讓更多人認識《金剛經》，也能在這裡聊聊天、說說心裡的煩惱。\n\n' +
+  '無相界是一個帶著金剛經視角的自在聊天空間。你可以抒發煩惱、問生活裡卡住的事，也可以單純想理解《金剛經》在說什麼。\n\n' +
+  '它不是籤詩機，也不是佛學講堂。金剛經在這裡比較像底色：需要時拿來照一下，不需要時就好好聊天。\n\n' +
   '目前由我個人自費維護。如果你覺得有幫助，歡迎分享給朋友；若想將這份善意延續下去，也歡迎隨喜捐款給你支持的慈善團體。\n\n' +
   '有任何建議，都歡迎寫信給我：erictu.engineer@gmail.com'
 
@@ -43,11 +42,8 @@ export async function handlePostback(userId, replyToken, data) {
 }
 
 async function handleCasualChat(replyToken) {
-  const pick = SCRIPTURE_STARTERS[Math.floor(Math.random() * SCRIPTURE_STARTERS.length)]
   const text =
-    `嗨～今天想跟你分享一句金剛經：\n\n` +
-    `「${pick.quote}」\n\n` +
-    `${pick.hook}`
+    CASUAL_CHAT_STARTERS[Math.floor(Math.random() * CASUAL_CHAT_STARTERS.length)]
   return replyMessage(replyToken, text)
 }
 

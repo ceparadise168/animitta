@@ -36,7 +36,7 @@ export class AnthropicProvider extends LlmProvider {
     })
     if (!res.ok) throw new Error(`Anthropic chat failed: ${res.status}`)
     const data = await res.json()
-    return { text: data.content[0].text }
+    return parseChatContent(data.content[0].text)
   }
 
   async summarize(existingSummary, turns) {
@@ -131,4 +131,21 @@ export class AnthropicProvider extends LlmProvider {
       userMessages: merged,
     }
   }
+}
+
+function parseChatContent(content) {
+  try {
+    const parsed = JSON.parse(content)
+    if (parsed && typeof parsed.text === 'string') {
+      return {
+        text: parsed.text,
+        suggestions: Array.isArray(parsed.suggestions)
+          ? parsed.suggestions.filter((item) => typeof item === 'string')
+          : [],
+      }
+    }
+  } catch {
+    // Plain text responses are valid; quick replies are optional.
+  }
+  return { text: content, suggestions: [] }
 }

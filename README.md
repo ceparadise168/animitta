@@ -1,19 +1,20 @@
 # Animitta 無相界
 
-A LINE Bot powered by Diamond Sutra (金剛經) wisdom. Acts as a wise mentor — blending ancient Buddhist scripture with practical life advice, management insight, and philosophical dialogue.
+A LINE Bot for free-form conversation through a Diamond Sutra (金剛經) lens. It lets people chat naturally first — venting, wondering, asking practical questions, or seeking Buddhist insight — and brings scripture in only when it helps.
 
 > 凡所有相，皆是虛妄；凡所有光，皆入視界。
 
-*Animitta (अनिमित्त)* — Sanskrit for "signless, without marks." In the Diamond Sutra, all forms are illusory; in physics, all light vanishes at the event horizon. This bot lives at that boundary.
+*Animitta (अनिमित्त)* — Sanskrit for "signless, without marks." In the Diamond Sutra, forms are not denied, but they are not fixed. This bot uses that spirit as background: a place to speak freely, loosen what is being held too tightly, and sometimes see through a thought that felt solid.
 
 ## What It Does
 
 **無相界** is a LINE chatbot that:
 
-- Answers life questions with Diamond Sutra wisdom
+- Creates a low-pressure place to chat, vent, or ask for perspective
+- Answers life questions with Diamond Sutra wisdom when the conversation calls for it
 - Gives practical advice on management, communication, and decision-making
-- Explains Buddhist concepts using everyday metaphors
-- Provides emotional support when needed — without forcing everything into therapy mode
+- Explains Buddhist concepts in plain Taiwanese Mandarin
+- Provides emotional support when needed without forcing everything into therapy mode or scripture mode
 - Remembers conversation context with a sliding window + LLM-powered summary compression
 
 ## Architecture
