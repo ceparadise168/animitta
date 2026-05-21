@@ -29,7 +29,7 @@ export class AnthropicProvider extends LlmProvider {
       body: JSON.stringify({
         model: this.#chatModel,
         max_tokens: 1024,
-        temperature: 0.9,
+        temperature: 0.8,
         ...(system && { system }),
         messages: userMessages,
       }),
@@ -45,10 +45,22 @@ export class AnthropicProvider extends LlmProvider {
       .join('\n')
 
     const prompt =
-      '將以下對話歷史濃縮為不超過 500 字的繁體中文摘要，保留：\n' +
-      '- 使用者提到的關鍵煩惱和情緒\n' +
-      '- 諮商師給過的重要建議\n' +
-      '- 對話的情感脈絡\n\n' +
+      '以中性、第三人稱、紀錄員視角，將以下對話歷史濃縮為不超過 500 字的繁體中文摘要。\n' +
+      '\n' +
+      '保留：\n' +
+      '- 使用者主動提到的關鍵事實（家庭/工作/健康/興趣等具體資訊）\n' +
+      '- 使用者表達過的核心煩惱或問題主題\n' +
+      '- 使用者明確表達過的情緒狀態（若有）\n' +
+      '- 重要的對話節點（user 問過什麼大問題、bot 給過什麼方向）\n' +
+      '\n' +
+      '不要：\n' +
+      '- 不要用「諮商師」「治療師」「導師」「mentor」「老師」等角色詞描述 bot 一方、用「無相界」或「bot」\n' +
+      '- 不要模仿無相界的語氣風格（不用 image-first、不用 LINE particle）\n' +
+      '- 不要評價對話品質、不要下任何建議、不要寫「應該」「建議」\n' +
+      '- 不要腦補使用者沒講過的家庭/婚姻/健康/伴侶/小孩等狀況\n' +
+      '\n' +
+      '**重要**：這份摘要是給未來對話的 bot 當 reference 用、是 context info、不是 voice template。bot 讀完不應該模仿摘要的語氣。\n' +
+      '\n' +
       (existingSummary ? `舊摘要：\n${existingSummary}\n\n` : '') +
       `需要壓縮的對話：\n${turnsText}`
 
