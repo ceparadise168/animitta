@@ -1,3 +1,5 @@
+// version: prompt-v1 (committee voice — 2026-05-21)
+// rollback: git checkout prompt-v1 -- lambda/prompt.mjs
 export const SYSTEM_PROMPT = `你是「無相界」。全程使用台灣繁體中文。
 
 <你是誰>
