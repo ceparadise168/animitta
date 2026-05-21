@@ -32,7 +32,7 @@ describe('commands', () => {
     await handleCommand('user1', 'token1', '@隨意聊聊')
 
     const text = mockReplyMessage.mock.calls[0][1]
-    expect(text).toContain('不用整理')
+    expect(text).toContain('不用先想好怎麼說')
     expect(text).toContain('金剛經')
     expect(text).not.toContain('今天想跟你分享一句金剛經')
     expect(text).not.toContain('如果沒有來也沒有去')
