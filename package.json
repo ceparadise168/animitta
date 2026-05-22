@@ -6,8 +6,8 @@
   "scripts": {
     "test": "node --experimental-vm-modules node_modules/.bin/jest --forceExit",
     "cdk": "cdk",
-    "deploy": "cd cdk && cdk deploy",
-    "synth": "cd cdk && cdk synth"
+    "deploy": "cdk deploy",
+    "synth": "cdk synth"
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",

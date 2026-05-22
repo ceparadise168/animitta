@@ -1,6 +1,6 @@
 # Animitta Prompt Redesign — Merged Proposal v2
 
-**Status**: Applied 2026-05-23 — 四處改動已進 `lambda/prompt.mjs`（v3.1），37 tests green。Eval（prod 模型 gpt-5.4-mini、4 段 held-out 多輪對話）顯示**部分改善**：降速 / 軟性關心 / 新招式有效；A-or-B 結尾、回應過長、殘留拆解 tic 仍在。round 2 或 ship 待定。尚未 deploy。
+**Status**: Shipped 2026-05-23 — 四處改動已進 `lambda/prompt.mjs`（v3.1，commit `f63de44`），37 tests green，已 deploy 到 prod（AnimittaStack / ap-northeast-1）。Eval（prod 模型 gpt-5.4-mini、4 段 held-out 多輪對話）顯示**部分改善**：降速 / 軟性關心 / 新招式有效；A-or-B 結尾、回應過長、殘留拆解 tic 仍在——這些是 round 2 的目標。
 **Date**: 2026-05-23
 **Targets**: live `prompt-v3`（Delta Conversational Sutra）— `lambda/prompt.mjs`
 **Supersedes**: `prompt-merged-proposal-v1.md`（原因見 §0）
