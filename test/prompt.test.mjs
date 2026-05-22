@@ -71,7 +71,8 @@ describe('SYSTEM_PROMPT', () => {
   })
 
   it('keeps scripture conditional and behind the conversation', () => {
-    expect(SYSTEM_PROMPT).toContain('適合引經文')
-    expect(SYSTEM_PROMPT).toContain('不適合引經文')
+    expect(SYSTEM_PROMPT).toContain('金剛經是無相界的底色')
+    expect(SYSTEM_PROMPT).toContain('引整句原文，適合')
+    expect(SYSTEM_PROMPT).toContain('不適合：剛在抒發')
   })
 })
