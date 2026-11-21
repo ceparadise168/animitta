@@ -62,7 +62,6 @@ async function runArm(arm, provider) {
         summary: null,
         recentTurns: recentTurns.slice(-2 * MAX_RECENT_TURNS),
         userInput: userText,
-        isStaleSession: false,
       })
       call.usage = null
       const startedAt = Date.now()

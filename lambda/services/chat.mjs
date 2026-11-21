@@ -12,23 +12,18 @@ export async function handleText(userId, replyToken, userText) {
 
   showLoadingIndicator(userId).catch((err) => console.warn(err.message))
 
-  const { summary, recentTurns, isStaleSession } = await getContext(userId)
+  const context = await getContext(userId)
+  const { text } = await provider.chatCompletion(buildMessages({ ...context, userInput: userText }))
+  const reply = stripMarkdown(text)
+  await replyMessage(replyToken, reply)
 
-  const effectiveTurns = isStaleSession ? [] : recentTurns
+  await remember(userId, context, userText, reply, provider)
+}
 
-  const messages = buildMessages({
-    summary,
-    recentTurns: effectiveTurns,
-    userInput: userText,
-    isStaleSession,
-  })
-  const { text: rawText } = await provider.chatCompletion(messages)
-  const response = stripMarkdown(rawText)
-  await replyMessage(replyToken, response)
-
-  if (isStaleSession) {
-    await archiveSession(userId, provider)
-  }
-  await saveTurn(userId, userText, response)
+// Every exchange the bot takes part in is written here, so a new way of
+// talking to the bot cannot skip the session bookkeeping.
+async function remember(userId, { previousSession }, userText, reply, provider) {
+  if (previousSession) await archiveSession(userId, provider)
+  await saveTurn(userId, userText, reply)
   await compressOldTurns(userId, provider)
 }

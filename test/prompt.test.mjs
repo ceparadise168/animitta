@@ -36,6 +36,36 @@ describe('buildMessages', () => {
     expect(lastThree[2]).toEqual({ role: 'user', content: '謝謝' })
   })
 
+  it('gives the previous session as labelled background, not as live turns', () => {
+    const msgs = buildMessages({
+      summary: null,
+      recentTurns: [],
+      previousSession: {
+        turns: [
+          { role: 'user', content: '我媽昨天住院了' },
+          { role: 'assistant', content: '嗯，這個很重' },
+        ],
+        idleMs: 3 * 3_600_000,
+      },
+      userInput: '她今天出院了',
+    })
+    const note = msgs.at(-2)
+    expect(note.role).toBe('system')
+    expect(note.content).toContain('隔了大約 3 小時')
+    expect(note.content).toContain('使用者：我媽昨天住院了\n無相界：嗯，這個很重')
+    expect(msgs.filter((m) => m.role !== 'system')).toEqual([{ role: 'user', content: '她今天出院了' }])
+  })
+
+  it('counts a gap of a day or more in days', () => {
+    const msgs = buildMessages({
+      summary: null,
+      recentTurns: [],
+      previousSession: { turns: [{ role: 'user', content: '嗨' }], idleMs: 50 * 3_600_000 },
+      userInput: '我回來了',
+    })
+    expect(msgs.at(-2).content).toContain('隔了大約 2 天')
+  })
+
   it('does not include fake user/assistant few-shot turns', () => {
     const msgs = buildMessages({ summary: null, recentTurns: [], userInput: '你好' })
     // Only system messages before the final user message

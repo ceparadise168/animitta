@@ -34,7 +34,7 @@ describe('chat service', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockGetProvider.mockReturnValue(mockProvider)
-    mockGetContext.mockResolvedValue({ summary: null, recentTurns: [] })
+    mockGetContext.mockResolvedValue({ summary: null, recentTurns: [], previousSession: null })
     mockSaveTurn.mockResolvedValue(undefined)
     mockCompressOldTurns.mockResolvedValue(undefined)
     mockReplyMessage.mockResolvedValue(undefined)

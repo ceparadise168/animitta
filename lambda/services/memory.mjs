@@ -51,24 +51,22 @@ export async function getContext(userId) {
     ),
   ])
 
-  const rawItems = turnsRes.Items || []
-
-  // sk format: TURN#<iso>#role — rawItems is newest-first
-  let isStaleSession = false
-  if (rawItems.length > 0) {
-    const latestIso = rawItems[0].sk.S.split('#')[1]
-    const idleMs = Date.now() - new Date(latestIso).getTime()
-    isStaleSession = idleMs > SESSION_IDLE_HOURS * 3600 * 1000
-  }
-
-  const recentTurns = inConversationOrder(rawItems).map((item) => ({
+  const items = inConversationOrder(turnsRes.Items || [])
+  const turns = items.map((item) => ({
     role: item.role.S,
     content: item.content.S,
   }))
-
   const summary = summaryRes.Item ? summaryRes.Item.content.S : null
 
-  return { summary, recentTurns, isStaleSession }
+  // After SESSION_IDLE_HOURS of silence a new session starts. The turns from
+  // before the gap are not folded into the summary until after this reply, so
+  // they travel along as the previous session instead of being dropped.
+  const lastAt = items.length ? Date.parse(items.at(-1).sk.S.split('#')[1]) : null
+  const idleMs = lastAt === null ? 0 : Date.now() - lastAt
+  if (idleMs > SESSION_IDLE_HOURS * 3600 * 1000) {
+    return { summary, recentTurns: [], previousSession: { turns, idleMs } }
+  }
+  return { summary, recentTurns: turns, previousSession: null }
 }
 
 export async function saveTurn(userId, userText, assistantText) {

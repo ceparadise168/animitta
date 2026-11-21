@@ -332,9 +332,24 @@ const FEW_SHOT_DEMOS = `<示範對話>
 收尾不一定要再丟一個問題或一個提議。讓這句話停在這，也可以
 </示範對話>`
 
-const STALE_SESSION_HINT = `（內部備註：使用者跟你已有一段時間沒對話了。這次是 fresh session 的開始。摘要只作為長期 context；回應仍以這次的訊息為主。可以自然打招呼，但不要假裝記得過去細節。）`
+function howLongAgo(ms) {
+  const hours = ms / 3_600_000
+  return hours < 24 ? `${Math.max(1, Math.round(hours))} 小時` : `${Math.round(hours / 24)} 天`
+}
 
-export function buildMessages({ summary, recentTurns, userInput, isStaleSession = false }) {
+function previousSessionNote({ turns, idleMs }) {
+  const transcript = turns
+    .map((t) => `${t.role === 'user' ? '使用者' : '無相界'}：${t.content}`)
+    .join('\n')
+  return (
+    `（內部備註：使用者隔了大約 ${howLongAgo(idleMs)}才回來，這是新的一段對話。` +
+    '下面是上一段對話，只當背景：他提到時要接得上，他沒提就不要主動翻出來；這裡沒寫到的細節，不要假裝記得。' +
+    '回應仍以他這次的訊息為主，可以自然打招呼。）\n' +
+    `上一段對話：\n${transcript}`
+  )
+}
+
+export function buildMessages({ summary, recentTurns, previousSession = null, userInput }) {
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'system', content: FEW_SHOT_DEMOS },
@@ -346,8 +361,8 @@ export function buildMessages({ summary, recentTurns, userInput, isStaleSession 
     })
   }
   messages.push(...recentTurns)
-  if (isStaleSession) {
-    messages.push({ role: 'system', content: STALE_SESSION_HINT })
+  if (previousSession) {
+    messages.push({ role: 'system', content: previousSessionNote(previousSession) })
   }
   messages.push({ role: 'user', content: userInput })
   return messages

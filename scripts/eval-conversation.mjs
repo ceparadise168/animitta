@@ -30,7 +30,6 @@ async function run() {
         summary: null,
         recentTurns: recentTurns.slice(-2 * MAX_RECENT_TURNS),
         userInput: userText,
-        isStaleSession: false,
       })
       let text
       try {
