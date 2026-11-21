@@ -20,7 +20,7 @@ jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({
   replyAndRemember: mockReplyAndRemember,
 }))
 
-const { handleCommand } = await import('../lambda/commands.mjs')
+const { handleCommand, isCommand } = await import('../lambda/commands.mjs')
 
 describe('commands', () => {
   beforeEach(() => {
@@ -65,6 +65,14 @@ describe('commands', () => {
     expect(text).toContain('45 天沒來聊天，就全部自動刪掉')
     expect(text).toContain('「清除記憶」')
     expect(text).toContain('Anthropic 的 Claude')
+  })
+
+
+  it('recognises only the exact menu texts as commands', () => {
+    expect(['@隨意聊聊', '@清除記憶', '@關於'].every(isCommand)).toBe(true)
+    expect(isCommand('@_@ 今天好累')).toBe(false)
+    expect(isCommand('@關於 你是誰')).toBe(false)
+    expect(isCommand('toString')).toBe(false)
   })
 
 })

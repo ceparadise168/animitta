@@ -24,6 +24,7 @@ const mockHandlePostback = jest.fn()
 jest.unstable_mockModule('../lambda/commands.mjs', () => ({
   handleCommand: mockHandleCommand,
   handlePostback: mockHandlePostback,
+  isCommand: (text) => text === '@隨意聊聊',
 }))
 
 const { handler } = await import('../lambda/index.mjs')
@@ -172,6 +173,44 @@ describe('Lambda handler', () => {
 
     expect(mockHandleCommand).toHaveBeenCalledWith('u1', 'tok', '@隨意聊聊')
     expect(mockHandleText).not.toHaveBeenCalled()
+  })
+
+  it('treats text that only starts with @ as a message, not a command', async () => {
+    const body = {
+      events: [{ type: 'message', replyToken: 'tok', source: { userId: 'u1' }, message: { type: 'text', text: '@_@ 今天好累' } }],
+    }
+
+    await handler(makeEvent(body))
+
+    expect(mockHandleCommand).not.toHaveBeenCalled()
+    expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok', '@_@ 今天好累')
+  })
+
+  it('still answers the other events when one event carries no source', async () => {
+    const body = {
+      events: [
+        { type: 'activated', chatControl: {} },
+        { type: 'message', replyToken: 'tok', source: { userId: 'u1' }, message: { type: 'text', text: '你好' } },
+      ],
+    }
+
+    const result = await handler(makeEvent(body))
+
+    expect(result.statusCode).toBe(200)
+    expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok', '你好')
+  })
+
+  it('logs failures as "Handler error", the text the CloudWatch alarm counts', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    mockHandleText.mockRejectedValue(new Error('Anthropic chat failed: 529'))
+    const body = {
+      events: [{ type: 'message', replyToken: 'tok', source: { userId: 'u1' }, message: { type: 'text', text: '你好' } }],
+    }
+
+    await handler(makeEvent(body))
+
+    expect(logged).toHaveBeenCalledWith('Handler error:', expect.any(Error))
+    logged.mockRestore()
   })
 
   it('routes postback events to handlePostback', async () => {

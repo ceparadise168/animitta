@@ -1,6 +1,6 @@
 import { verifySignature, replyMessage, linkRichMenu } from './line.mjs'
 import { handleText, replyAndRemember } from './services/chat.mjs'
-import { handleCommand, handlePostback } from './commands.mjs'
+import { handleCommand, handlePostback, isCommand } from './commands.mjs'
 
 const WELCOME_MESSAGE =
   '嗨～我是無相界 🌿\n\n' +
@@ -45,10 +45,11 @@ export async function handler(event) {
 }
 
 async function handleEvent(lineEvent) {
-  const userId = lineEvent.source.userId
   const replyToken = lineEvent.replyToken
 
   try {
+    // Some event types (channel activation, for one) carry no source.
+    const userId = lineEvent.source?.userId
     if (lineEvent.type === 'follow') {
       // User added bot or unblocked — send welcome + re-link Rich Menu
       await replyMessage(replyToken, WELCOME_MESSAGE)
@@ -60,7 +61,7 @@ async function handleEvent(lineEvent) {
     } else if (lineEvent.type === 'message') {
       const msg = lineEvent.message
 
-      if (msg.type === 'text' && msg.text.startsWith('@')) {
+      if (msg.type === 'text' && isCommand(msg.text)) {
         await handleCommand(userId, replyToken, msg.text)
       } else if (msg.type === 'text') {
         await handleText(userId, replyToken, msg.text)

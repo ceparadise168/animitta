@@ -20,17 +20,17 @@ const ABOUT_MESSAGE =
   '目前由我個人自費維護。如果你覺得有幫助，歡迎分享給朋友；若想將這份善意延續下去，也歡迎隨喜捐款給你支持的慈善團體。\n\n' +
   '有任何建議，都歡迎寫信給我：erictu.engineer@gmail.com'
 
+const COMMANDS = {
+  '@隨意聊聊': (userId, replyToken) => handleCasualChat(userId, replyToken),
+  '@清除記憶': (userId, replyToken) => handleClearMemory(replyToken),
+  '@關於': (userId, replyToken) => replyMessage(replyToken, ABOUT_MESSAGE),
+}
+
+// Only the exact menu texts are commands; "@_@ 今天好累" is a message.
+export const isCommand = (text) => Object.hasOwn(COMMANDS, text)
+
 export async function handleCommand(userId, replyToken, command) {
-  switch (command) {
-    case '@隨意聊聊':
-      return handleCasualChat(userId, replyToken)
-    case '@清除記憶':
-      return handleClearMemory(replyToken)
-    case '@關於':
-      return replyMessage(replyToken, ABOUT_MESSAGE)
-    default:
-      return false
-  }
+  return COMMANDS[command](userId, replyToken)
 }
 
 export async function handlePostback(userId, replyToken, data) {
