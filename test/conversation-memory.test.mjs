@@ -257,6 +257,15 @@ describe('conversation memory, end to end', () => {
       expectExpiryInDays(summaryRow().ttl, 90)
     })
 
+    it('keeps a brand-new summary for CONVERSATION_TTL_DAYS too', async () => {
+      putTurn(185, '我媽昨天住院了', '嗯，這個很重')
+
+      await sendText('她今天出院了')
+
+      expect(summaryRow().content.S).toContain('我媽昨天住院了')
+      expectExpiryInDays(summaryRow().ttl, 90)
+    })
+
     it('never folds expired turns into a new summary', async () => {
       putTurn(31 * 24 * 60, '我在考慮離婚', '嗯，這個很重', secondsFromNow(-DAY))
       putTurn(185, '今天天氣好好', '真的，適合出去走走')
