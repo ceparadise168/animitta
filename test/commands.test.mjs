@@ -66,12 +66,12 @@ describe('commands', () => {
     expect(text).toContain('Anthropic 的 Claude')
   })
 
-  it('tells users what their words are used for and that they are encrypted', async () => {
+  it('tells users what their words are used for, and that encryption does not keep them from the AI service', async () => {
     await handleCommand('user1', 'token1', '@關於')
 
     const text = mockReplyMessage.mock.calls[0][1]
     expect(text).toContain('只用來讓它接得上話，不會拿去做別的事')
-    expect(text).toContain('傳送和存放時也都有加密')
+    expect(text).toContain('都有加密，不過要產生回覆，你傳的文字還是會交給 AI 服務')
   })
 
 
