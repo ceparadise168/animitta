@@ -1,5 +1,5 @@
 import { verifySignature, replyMessage, linkRichMenu } from './line.mjs'
-import { handleText } from './services/chat.mjs'
+import { handleText, replyAndRemember } from './services/chat.mjs'
 import { handleCommand, handlePostback } from './commands.mjs'
 
 const WELCOME_MESSAGE =
@@ -14,6 +14,21 @@ const WELCOME_MESSAGE =
 
 const FALLBACK_REPLY = '我這邊暫時卡住了，沒辦法好好回你。過一下再傳一次給我好嗎'
 const TEXT_ONLY_REPLY = '目前我只能讀文字，可以打字跟我說嗎'
+
+// What the bot remembers the user sending when it cannot read the message.
+const UNREADABLE_MESSAGES = {
+  audio: '（傳了一段語音）',
+  image: '（傳了一張圖片）',
+  video: '（傳了一段影片）',
+  file: '（傳了一個檔案）',
+  location: '（傳了一個位置）',
+}
+
+// A sticker is how the user feels right now, so the model gets it as words.
+function stickerAsText({ keywords = [], text }) {
+  const parts = [keywords.join('、'), text && `上面寫著「${text.replace(/\s+/g, ' ')}」`].filter(Boolean)
+  return parts.length ? `（傳了一張貼圖：${parts.join('，')}）` : '（傳了一張貼圖）'
+}
 
 export async function handler(event) {
   const body = event.isBase64Encoded
@@ -53,8 +68,10 @@ async function handleEvent(lineEvent) {
         await handleCommand(userId, replyToken, msg.text)
       } else if (msg.type === 'text') {
         await handleText(userId, replyToken, msg.text)
-      } else if (msg.type === 'audio') {
-        await replyMessage(replyToken, TEXT_ONLY_REPLY)
+      } else if (msg.type === 'sticker') {
+        await handleText(userId, replyToken, stickerAsText(msg))
+      } else if (UNREADABLE_MESSAGES[msg.type]) {
+        await replyAndRemember(userId, replyToken, UNREADABLE_MESSAGES[msg.type], TEXT_ONLY_REPLY)
       }
     }
   } catch (err) {

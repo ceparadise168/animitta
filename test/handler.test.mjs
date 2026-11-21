@@ -3,8 +3,10 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals'
 process.env.LINE_CHANNEL_SECRET = 'test-secret'
 
 const mockHandleText = jest.fn()
+const mockReplyAndRemember = jest.fn()
 jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({
   handleText: mockHandleText,
+  replyAndRemember: mockReplyAndRemember,
 }))
 
 const mockVerifySignature = jest.fn()
@@ -31,6 +33,7 @@ describe('Lambda handler', () => {
     jest.clearAllMocks()
     mockVerifySignature.mockReturnValue(true)
     mockHandleText.mockResolvedValue(undefined)
+    mockReplyAndRemember.mockResolvedValue(undefined)
     mockHandleCommand.mockResolvedValue(undefined)
     mockHandlePostback.mockResolvedValue(undefined)
   })
@@ -74,8 +77,34 @@ describe('Lambda handler', () => {
 
     await handler(makeEvent(body))
 
-    expect(mockReplyMessage).toHaveBeenCalledWith('tok', expect.stringContaining('打字'))
+    expect(mockReplyAndRemember).toHaveBeenCalledWith('u1', 'tok', '（傳了一段語音）', expect.stringContaining('打字'))
     expect(mockHandleText).not.toHaveBeenCalled()
+  })
+
+  it('asks for text when a photo arrives, and remembers that a photo came', async () => {
+    const body = {
+      events: [{ type: 'message', replyToken: 'tok', source: { userId: 'u1' }, message: { type: 'image', id: 'img1' } }],
+    }
+
+    await handler(makeEvent(body))
+
+    expect(mockReplyAndRemember).toHaveBeenCalledWith('u1', 'tok', '（傳了一張圖片）', expect.stringContaining('打字'))
+  })
+
+  it('passes a sticker to the model as words, from its keywords and text', async () => {
+    const sticker = (message) => ({
+      events: [{ type: 'message', replyToken: 'tok', source: { userId: 'u1' }, message: { type: 'sticker', ...message } }],
+    })
+
+    await handler(makeEvent(sticker({ keywords: ['cry', 'sad'] })))
+    await handler(makeEvent(sticker({ keywords: ['tired'], text: '好累\n喔' })))
+    await handler(makeEvent(sticker({})))
+
+    expect(mockHandleText.mock.calls.map((call) => call[2])).toEqual([
+      '（傳了一張貼圖：cry、sad）',
+      '（傳了一張貼圖：tired，上面寫著「好累 喔」）',
+      '（傳了一張貼圖）',
+    ])
   })
 
   it('handles every event in one webhook, including other users', async () => {
