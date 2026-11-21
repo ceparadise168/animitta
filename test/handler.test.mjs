@@ -78,6 +78,38 @@ describe('Lambda handler', () => {
     expect(mockHandleText).not.toHaveBeenCalled()
   })
 
+  it('handles every event in one webhook, including other users', async () => {
+    const body = {
+      events: [
+        { type: 'message', replyToken: 'tok-a', source: { userId: 'u1' }, message: { type: 'text', text: '你好' } },
+        { type: 'message', replyToken: 'tok-b', source: { userId: 'u2' }, message: { type: 'text', text: '嗨' } },
+      ],
+    }
+
+    await handler(makeEvent(body))
+
+    expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok-a', '你好')
+    expect(mockHandleText).toHaveBeenCalledWith('u2', 'tok-b', '嗨')
+  })
+
+  it('keeps going when one event in the webhook fails, and apologises on that event only', async () => {
+    mockHandleText.mockRejectedValueOnce(new Error('Anthropic chat failed: 529'))
+    mockReplyMessage.mockResolvedValue(undefined)
+    const body = {
+      events: [
+        { type: 'message', replyToken: 'tok-a', source: { userId: 'u1' }, message: { type: 'text', text: '你好' } },
+        { type: 'message', replyToken: 'tok-b', source: { userId: 'u2' }, message: { type: 'text', text: '嗨' } },
+      ],
+    }
+
+    const result = await handler(makeEvent(body))
+
+    expect(result.statusCode).toBe(200)
+    expect(mockHandleText).toHaveBeenCalledWith('u2', 'tok-b', '嗨')
+    expect(mockReplyMessage).toHaveBeenCalledTimes(1)
+    expect(mockReplyMessage).toHaveBeenCalledWith('tok-a', expect.stringContaining('暫時'))
+  })
+
   it('rejects invalid signature with 401', async () => {
     mockVerifySignature.mockReturnValue(false)
 

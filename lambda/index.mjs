@@ -25,14 +25,15 @@ export async function handler(event) {
     return { statusCode: 401, body: 'Invalid signature' }
   }
 
-  const parsed = JSON.parse(body)
-  const events = parsed.events || []
-
-  if (events.length === 0) {
-    return { statusCode: 200, body: 'No events' }
+  // One webhook may carry several events, and not necessarily from one user.
+  for (const lineEvent of JSON.parse(body).events || []) {
+    await handleEvent(lineEvent)
   }
 
-  const lineEvent = events[0]
+  return { statusCode: 200, body: 'OK' }
+}
+
+async function handleEvent(lineEvent) {
   const userId = lineEvent.source.userId
   const replyToken = lineEvent.replyToken
 
@@ -61,6 +62,4 @@ export async function handler(event) {
     // Fails harmlessly when the reply token was already used before the error.
     await replyMessage(replyToken, FALLBACK_REPLY).catch(() => {})
   }
-
-  return { statusCode: 200, body: 'OK' }
 }
