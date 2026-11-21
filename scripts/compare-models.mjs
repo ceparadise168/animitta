@@ -67,14 +67,13 @@ async function runArm(arm, provider) {
       call.usage = null
       const startedAt = Date.now()
       try {
-        const { text, suggestions } = await provider.chatCompletion(messages)
+        const { text } = await provider.chatCompletion(messages)
         const ms = Date.now() - startedAt
         const inputTokens = call.usage?.input_tokens ?? 0
         const outputTokens = call.usage?.output_tokens ?? 0
         turns.push({
           user: userText,
           text,
-          suggestions,
           chars: [...text.replace(/\s/g, '')].length,
           ms,
           overLambdaTimeout: ms > LAMBDA_TIMEOUT_MS,

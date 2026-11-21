@@ -17,17 +17,13 @@ jest.unstable_mockModule('../lambda/providers/index.mjs', () => ({
 }))
 
 const mockReplyMessage = jest.fn()
-const mockReplyWithQuickReplyMessage = jest.fn()
 jest.unstable_mockModule('../lambda/line.mjs', () => ({
   replyMessage: mockReplyMessage,
-  replyWithQuickReplyMessage: mockReplyWithQuickReplyMessage,
   verifySignature: jest.fn(),
   showLoadingIndicator: jest.fn().mockResolvedValue(undefined),
 }))
 
-const { handleText } = await import(
-  '../lambda/services/chat.mjs'
-)
+const { handleText } = await import('../lambda/services/chat.mjs')
 
 describe('chat service', () => {
   const mockProvider = {
@@ -42,15 +38,11 @@ describe('chat service', () => {
     mockSaveTurn.mockResolvedValue(undefined)
     mockCompressOldTurns.mockResolvedValue(undefined)
     mockReplyMessage.mockResolvedValue(undefined)
-    mockReplyWithQuickReplyMessage.mockResolvedValue(undefined)
   })
 
   describe('handleText', () => {
-    it('replies with plain message when no suggestions', async () => {
-      mockProvider.chatCompletion.mockResolvedValue({
-        text: '佛曰：**放下**吧',
-        suggestions: [],
-      })
+    it('replies with the model text stripped of markdown and remembers the turn', async () => {
+      mockProvider.chatCompletion.mockResolvedValue({ text: '佛曰：**放下**吧' })
 
       await handleText('user1', 'token1', '我好累')
 
@@ -60,40 +52,5 @@ describe('chat service', () => {
       expect(mockSaveTurn).toHaveBeenCalledWith('user1', '我好累', '佛曰：放下吧')
       expect(mockCompressOldTurns).toHaveBeenCalledWith('user1', mockProvider)
     })
-
-    it('replies with quick reply buttons when suggestions present', async () => {
-      mockProvider.chatCompletion.mockResolvedValue({
-        text: '金剛經核心有幾個方向',
-        suggestions: ['空性', '無我', '無住'],
-      })
-
-      await handleText('user1', 'token1', '金剛經核心思想')
-
-      expect(mockReplyWithQuickReplyMessage).toHaveBeenCalledWith(
-        'token1',
-        '金剛經核心有幾個方向',
-        [
-          { label: '空性', text: '空性' },
-          { label: '無我', text: '無我' },
-          { label: '無住', text: '無住' },
-        ]
-      )
-      expect(mockReplyMessage).not.toHaveBeenCalled()
-    })
-
-    it('keeps quick reply labels within LINE limits while preserving full text', async () => {
-      const longSuggestion = '這是一個超過二十個字很多很多的建議選項應該被截短'
-      mockProvider.chatCompletion.mockResolvedValue({
-        text: '可以從這裡開始',
-        suggestions: [longSuggestion],
-      })
-
-      await handleText('user1', 'token1', '我想聊聊')
-
-      const items = mockReplyWithQuickReplyMessage.mock.calls[0][2]
-      expect(items[0].label.length).toBeLessThanOrEqual(20)
-      expect(items[0].text).toBe(longSuggestion)
-    })
   })
-
 })

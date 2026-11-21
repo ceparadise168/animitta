@@ -18,11 +18,11 @@ describe('OpenAiProvider', () => {
   })
 
   describe('chatCompletion', () => {
-    it('sends messages and returns structured { text, suggestions }', async () => {
+    it('sends messages and returns the reply text', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          choices: [{ message: { content: JSON.stringify({ text: '回覆內容', suggestions: ['A', 'B'] }) } }],
+          choices: [{ message: { content: '回覆內容' } }],
         }),
       })
 
@@ -30,26 +30,11 @@ describe('OpenAiProvider', () => {
         { role: 'user', content: '你好' },
       ])
 
-      expect(result).toEqual({ text: '回覆內容', suggestions: ['A', 'B'] })
+      expect(result).toEqual({ text: '回覆內容' })
       expect(mockFetch).toHaveBeenCalledWith(
         'https://api.openai.com/v1/chat/completions',
         expect.objectContaining({ method: 'POST' })
       )
-    })
-
-    it('returns empty suggestions when none provided', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          choices: [{ message: { content: JSON.stringify({ text: '回覆', suggestions: [] }) } }],
-        }),
-      })
-
-      const result = await provider.chatCompletion([
-        { role: 'user', content: '你好' },
-      ])
-
-      expect(result).toEqual({ text: '回覆', suggestions: [] })
     })
 
     it('throws on API error', async () => {

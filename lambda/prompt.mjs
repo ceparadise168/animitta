@@ -334,8 +334,6 @@ const FEW_SHOT_DEMOS = `<示範對話>
 
 const STALE_SESSION_HINT = `（內部備註：使用者跟你已有一段時間沒對話了。這次是 fresh session 的開始。摘要只作為長期 context；回應仍以這次的訊息為主。可以自然打招呼，但不要假裝記得過去細節。）`
 
-export const FEW_SHOT_EXAMPLES = []
-
 export function buildMessages({ summary, recentTurns, userInput, isStaleSession = false }) {
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },

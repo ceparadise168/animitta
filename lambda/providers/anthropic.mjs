@@ -35,7 +35,7 @@ export class AnthropicProvider extends LlmProvider {
     })
     if (!res.ok) throw new Error(`Anthropic chat failed: ${res.status}`)
     const data = await res.json()
-    return parseChatContent(readReplyText(data))
+    return { text: readReplyText(data) }
   }
 
   // Claude 4.6+ models reject temperature and think before answering; they are
@@ -127,21 +127,4 @@ function readReplyText(data) {
   const text = data.content.find((block) => block.type === 'text')?.text
   if (!text) throw new Error(`Anthropic chat returned no text (stop_reason: ${data.stop_reason})`)
   return text
-}
-
-function parseChatContent(content) {
-  try {
-    const parsed = JSON.parse(content)
-    if (parsed && typeof parsed.text === 'string') {
-      return {
-        text: parsed.text,
-        suggestions: Array.isArray(parsed.suggestions)
-          ? parsed.suggestions.filter((item) => typeof item === 'string')
-          : [],
-      }
-    }
-  } catch {
-    // Plain text responses are valid; quick replies are optional.
-  }
-  return { text: content, suggestions: [] }
 }

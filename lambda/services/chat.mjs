@@ -1,29 +1,10 @@
 import { getContext, saveTurn, compressOldTurns, archiveSession } from './memory.mjs'
 import { getProvider } from '../providers/index.mjs'
 import { buildMessages } from '../prompt.mjs'
-import {
-  replyMessage,
-  replyWithQuickReplyMessage,
-  showLoadingIndicator,
-} from '../line.mjs'
+import { replyMessage, showLoadingIndicator } from '../line.mjs'
 
 function stripMarkdown(text) {
   return text.replace(/[*#_~`>]/g, '')
-}
-
-const QUICK_REPLY_LABEL_MAX_LENGTH = 20
-
-function formatQuickReplySuggestion(suggestion) {
-  const text = stripMarkdown(suggestion).trim()
-  if (!text) return null
-
-  return {
-    label:
-      text.length > QUICK_REPLY_LABEL_MAX_LENGTH
-        ? `${text.slice(0, QUICK_REPLY_LABEL_MAX_LENGTH - 1)}…`
-        : text,
-    text,
-  }
 }
 
 export async function handleText(userId, replyToken, userText) {
@@ -41,17 +22,9 @@ export async function handleText(userId, replyToken, userText) {
     userInput: userText,
     isStaleSession,
   })
-  const { text: rawText, suggestions = [] } = await provider.chatCompletion(messages)
+  const { text: rawText } = await provider.chatCompletion(messages)
   const response = stripMarkdown(rawText)
-  const quickReplyItems = Array.isArray(suggestions)
-    ? suggestions.slice(0, 3).map(formatQuickReplySuggestion).filter(Boolean)
-    : []
-
-  if (quickReplyItems.length > 0) {
-    await replyWithQuickReplyMessage(replyToken, response, quickReplyItems)
-  } else {
-    await replyMessage(replyToken, response)
-  }
+  await replyMessage(replyToken, response)
 
   if (isStaleSession) {
     await archiveSession(userId, provider)

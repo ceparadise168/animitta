@@ -13,18 +13,15 @@ jest.unstable_mockModule('../lambda/line.mjs', () => ({
   verifySignature: mockVerifySignature,
   replyMessage: mockReplyMessage,
   replyWithQuickReply: jest.fn(),
-  replyWithQuickReplyMessage: jest.fn(),
   showLoadingIndicator: jest.fn().mockResolvedValue(undefined),
   linkRichMenu: jest.fn().mockResolvedValue(undefined),
 }))
 
 const mockHandleCommand = jest.fn()
 const mockHandlePostback = jest.fn()
-const mockTryHandleFeedbackText = jest.fn()
 jest.unstable_mockModule('../lambda/commands.mjs', () => ({
   handleCommand: mockHandleCommand,
   handlePostback: mockHandlePostback,
-  tryHandleFeedbackText: mockTryHandleFeedbackText,
 }))
 
 const { handler } = await import('../lambda/index.mjs')
@@ -36,7 +33,6 @@ describe('Lambda handler', () => {
     mockHandleText.mockResolvedValue(undefined)
     mockHandleCommand.mockResolvedValue(undefined)
     mockHandlePostback.mockResolvedValue(undefined)
-    mockTryHandleFeedbackText.mockResolvedValue(false)
   })
 
   function makeEvent(body, signature = 'valid-sig') {
@@ -124,14 +120,14 @@ describe('Lambda handler', () => {
           type: 'postback',
           replyToken: 'tok',
           source: { userId: 'u1' },
-          postback: { data: 'feedback:good' },
+          postback: { data: 'action=casual_chat' },
         },
       ],
     }
 
     await handler(makeEvent(body))
 
-    expect(mockHandlePostback).toHaveBeenCalledWith('u1', 'tok', 'feedback:good')
+    expect(mockHandlePostback).toHaveBeenCalledWith('u1', 'tok', 'action=casual_chat')
   })
 
   const textEvent = {

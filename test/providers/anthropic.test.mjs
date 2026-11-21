@@ -35,7 +35,7 @@ describe('AnthropicProvider', () => {
       ]
       const result = await provider.chatCompletion(messages)
 
-      expect(result).toEqual({ text: '回覆', suggestions: [] })
+      expect(result).toEqual({ text: '回覆' })
       const callBody = JSON.parse(mockFetch.mock.calls[0][1].body)
       expect(callBody.system).toBe('You are helpful.')
       expect(callBody.messages).toEqual([{ role: 'user', content: '你好' }])
@@ -116,7 +116,7 @@ describe('AnthropicProvider', () => {
 
       const result = await provider.chatCompletion([{ role: 'user', content: '你好' }])
 
-      expect(result).toEqual({ text: '回覆', suggestions: [] })
+      expect(result).toEqual({ text: '回覆' })
     })
 
     it('throws when the model refuses instead of replying with nothing', async () => {

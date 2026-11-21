@@ -32,9 +32,9 @@ async function run() {
         userInput: userText,
         isStaleSession: false,
       })
-      let text, suggestions
+      let text
       try {
-        ;({ text, suggestions } = await provider.chatCompletion(messages))
+        ;({ text } = await provider.chatCompletion(messages))
       } catch (err) {
         console.log(`使用者：${userText}`)
         console.log(`[ERROR] ${err.message}\n`)
@@ -43,9 +43,6 @@ async function run() {
       const tic = text.includes('拆') ? ' ⚠拆' : ''
       console.log(`使用者：${userText}`)
       console.log(`無相界（${charCount(text)} 字${tic}）：${text}`)
-      if (suggestions && suggestions.length) {
-        console.log(`  [suggestions: ${JSON.stringify(suggestions)}]`)
-      }
       console.log('')
       recentTurns.push(
         { role: 'user', content: userText },
