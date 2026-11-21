@@ -60,13 +60,15 @@ const nowSeconds = () => Math.floor(Date.now() / 1000)
 const secondsFromNow = (s) => ({ N: String(nowSeconds() + s) })
 
 let replyTokens = 0
-function send(event) {
-  const body = JSON.stringify({ events: [{ replyToken: `rt-${++replyTokens}`, source: { type: 'user', userId: USER }, ...event }] })
+// LINE's timestamp on each event: by default every event is a second after the last.
+let lineClock = Date.now()
+function send(event, timestamp = (lineClock += 1000)) {
+  const body = JSON.stringify({ events: [{ replyToken: `rt-${++replyTokens}`, timestamp, source: { type: 'user', userId: USER }, ...event }] })
   const signature = createHmac('SHA256', 'test-secret').update(body).digest('base64')
   return handler({ body, headers: { 'x-line-signature': signature } })
 }
-const sendText = (text) => send({ type: 'message', message: { type: 'text', text } })
-const confirmClear = () => send({ type: 'postback', postback: { data: 'confirm:clear' } })
+const sendText = (text, timestamp) => send({ type: 'message', message: { type: 'text', text } }, timestamp)
+const confirmClear = (timestamp) => send({ type: 'postback', postback: { data: 'confirm:clear' } }, timestamp)
 
 function putTurn(minutesAgo, userText, botText, ttl) {
   const iso = new Date(Date.now() - minutesAgo * 60_000).toISOString()
@@ -318,6 +320,41 @@ describe('conversation memory, end to end', () => {
       expect(everythingSent(chatRequests[1])).not.toContain('我老公又沒回家')
     })
 
+    it('forgets a message sent before 清除記憶 even when LINE delivers it after the clear', async () => {
+      putTurn(10, '我在考慮離婚', '嗯')
+      const tappedAt = (lineClock += 1000)
+      await confirmClear(tappedAt)
+
+      await sendText('剛剛說太多了', tappedAt - 2000)
+
+      expect(turnRows()).toEqual([])
+    })
+
+    it('keeps a message sent after 清除記憶 even when it was being answered before the clear was handled', async () => {
+      putTurn(10, '我在考慮離婚', '嗯')
+      const tappedAt = (lineClock += 1000)
+      llm.beforeChatReply = async () => {
+        llm.beforeChatReply = async () => {}
+        await confirmClear(tappedAt)
+      }
+
+      await sendText('我想重新開始', tappedAt + 1500)
+
+      expect(turnRows().map((r) => r.content.S).sort()).toEqual(['我想重新開始', '（模型的回覆）'].sort())
+    })
+
+    it('says so when 清除記憶 could not finish, instead of a generic apology', async () => {
+      const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+      putTurn(10, '嗨', '嗨')
+      hooks.unprocessedBatches = 100
+
+      await confirmClear()
+
+      expect(lineReplies).toEqual(['記憶還沒清乾淨，等一下再按一次「清除記憶」好嗎'])
+      expect(logged).toHaveBeenCalledWith('Handler error:', expect.any(Error))
+      logged.mockRestore()
+    })
+
     it('remembers a message that arrived after 清除記憶', async () => {
       putTurn(10, '我在考慮離婚', '嗯')
       await confirmClear()
@@ -347,18 +384,6 @@ describe('conversation memory, end to end', () => {
 
       expect(rememberedRows()).toEqual([])
       expect(lineReplies).toEqual(['好的，記憶已清空 ✨ 我們從這裡重新開始'])
-    })
-
-    it('does not say memory was cleared when DynamoDB keeps refusing the deletes', async () => {
-      const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
-      putTurn(10, '嗨', '嗨')
-      hooks.unprocessedBatches = 100
-
-      await confirmClear()
-
-      expect(lineReplies).not.toContain('好的，記憶已清空 ✨ 我們從這裡重新開始')
-      expect(lineReplies[0]).toContain('暫時卡住')
-      logged.mockRestore()
     })
 
     it('folds a previous session longer than what the model was shown, so none of it comes back as live turns', async () => {

@@ -28,6 +28,7 @@ jest.unstable_mockModule('../lambda/commands.mjs', () => ({
 }))
 
 const { handler } = await import('../lambda/index.mjs')
+const SENT_AT = 1795270000000
 
 describe('Lambda handler', () => {
   beforeEach(() => {
@@ -52,7 +53,7 @@ describe('Lambda handler', () => {
         {
           type: 'message',
           replyToken: 'tok',
-          source: { type: 'user', userId: 'u1' },
+          timestamp: SENT_AT, source: { type: 'user', userId: 'u1' },
           message: { type: 'text', text: '你好' },
         },
       ],
@@ -61,7 +62,7 @@ describe('Lambda handler', () => {
     const result = await handler(makeEvent(body))
 
     expect(result.statusCode).toBe(200)
-    expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok', '你好')
+    expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok', '你好', SENT_AT)
   })
 
   it('asks the user to type instead when a voice message arrives', async () => {
@@ -70,7 +71,7 @@ describe('Lambda handler', () => {
         {
           type: 'message',
           replyToken: 'tok',
-          source: { type: 'user', userId: 'u1' },
+          timestamp: SENT_AT, source: { type: 'user', userId: 'u1' },
           message: { type: 'audio', id: 'audio123' },
         },
       ],
@@ -78,23 +79,23 @@ describe('Lambda handler', () => {
 
     await handler(makeEvent(body))
 
-    expect(mockReplyAndRemember).toHaveBeenCalledWith('u1', 'tok', '（傳了一段語音）', expect.stringContaining('打字'))
+    expect(mockReplyAndRemember).toHaveBeenCalledWith('u1', 'tok', '（傳了一段語音）', expect.stringContaining('打字'), SENT_AT)
     expect(mockHandleText).not.toHaveBeenCalled()
   })
 
   it('asks for text when a photo arrives, and remembers that a photo came', async () => {
     const body = {
-      events: [{ type: 'message', replyToken: 'tok', source: { type: 'user', userId: 'u1' }, message: { type: 'image', id: 'img1' } }],
+      events: [{ type: 'message', replyToken: 'tok', timestamp: SENT_AT, source: { type: 'user', userId: 'u1' }, message: { type: 'image', id: 'img1' } }],
     }
 
     await handler(makeEvent(body))
 
-    expect(mockReplyAndRemember).toHaveBeenCalledWith('u1', 'tok', '（傳了一張圖片）', expect.stringContaining('打字'))
+    expect(mockReplyAndRemember).toHaveBeenCalledWith('u1', 'tok', '（傳了一張圖片）', expect.stringContaining('打字'), SENT_AT)
   })
 
   it('passes a sticker to the model as words, from its keywords and text', async () => {
     const sticker = (message) => ({
-      events: [{ type: 'message', replyToken: 'tok', source: { type: 'user', userId: 'u1' }, message: { type: 'sticker', ...message } }],
+      events: [{ type: 'message', replyToken: 'tok', timestamp: SENT_AT, source: { type: 'user', userId: 'u1' }, message: { type: 'sticker', ...message } }],
     })
 
     await handler(makeEvent(sticker({ keywords: ['cry', 'sad'] })))
@@ -111,15 +112,15 @@ describe('Lambda handler', () => {
   it('handles every event in one webhook, including other users', async () => {
     const body = {
       events: [
-        { type: 'message', replyToken: 'tok-a', source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } },
-        { type: 'message', replyToken: 'tok-b', source: { type: 'user', userId: 'u2' }, message: { type: 'text', text: '嗨' } },
+        { type: 'message', replyToken: 'tok-a', timestamp: SENT_AT, source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } },
+        { type: 'message', replyToken: 'tok-b', timestamp: SENT_AT, source: { type: 'user', userId: 'u2' }, message: { type: 'text', text: '嗨' } },
       ],
     }
 
     await handler(makeEvent(body))
 
-    expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok-a', '你好')
-    expect(mockHandleText).toHaveBeenCalledWith('u2', 'tok-b', '嗨')
+    expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok-a', '你好', SENT_AT)
+    expect(mockHandleText).toHaveBeenCalledWith('u2', 'tok-b', '嗨', SENT_AT)
   })
 
   it('keeps going when one event in the webhook fails, and apologises on that event only', async () => {
@@ -127,15 +128,15 @@ describe('Lambda handler', () => {
     mockReplyMessage.mockResolvedValue(undefined)
     const body = {
       events: [
-        { type: 'message', replyToken: 'tok-a', source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } },
-        { type: 'message', replyToken: 'tok-b', source: { type: 'user', userId: 'u2' }, message: { type: 'text', text: '嗨' } },
+        { type: 'message', replyToken: 'tok-a', timestamp: SENT_AT, source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } },
+        { type: 'message', replyToken: 'tok-b', timestamp: SENT_AT, source: { type: 'user', userId: 'u2' }, message: { type: 'text', text: '嗨' } },
       ],
     }
 
     const result = await handler(makeEvent(body))
 
     expect(result.statusCode).toBe(200)
-    expect(mockHandleText).toHaveBeenCalledWith('u2', 'tok-b', '嗨')
+    expect(mockHandleText).toHaveBeenCalledWith('u2', 'tok-b', '嗨', SENT_AT)
     expect(mockReplyMessage).toHaveBeenCalledTimes(1)
     expect(mockReplyMessage).toHaveBeenCalledWith('tok-a', expect.stringContaining('暫時'))
   })
@@ -163,7 +164,7 @@ describe('Lambda handler', () => {
         {
           type: 'message',
           replyToken: 'tok',
-          source: { type: 'user', userId: 'u1' },
+          timestamp: SENT_AT, source: { type: 'user', userId: 'u1' },
           message: { type: 'text', text: '@隨意聊聊' },
         },
       ],
@@ -171,33 +172,43 @@ describe('Lambda handler', () => {
 
     await handler(makeEvent(body))
 
-    expect(mockHandleCommand).toHaveBeenCalledWith('u1', 'tok', '@隨意聊聊')
+    expect(mockHandleCommand).toHaveBeenCalledWith('u1', 'tok', '@隨意聊聊', SENT_AT)
     expect(mockHandleText).not.toHaveBeenCalled()
   })
 
   it('treats text that only starts with @ as a message, not a command', async () => {
     const body = {
-      events: [{ type: 'message', replyToken: 'tok', source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '@_@ 今天好累' } }],
+      events: [{ type: 'message', replyToken: 'tok', timestamp: SENT_AT, source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '@_@ 今天好累' } }],
     }
 
     await handler(makeEvent(body))
 
     expect(mockHandleCommand).not.toHaveBeenCalled()
-    expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok', '@_@ 今天好累')
+    expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok', '@_@ 今天好累', SENT_AT)
   })
 
   it('still answers the other events when one event carries no source', async () => {
     const body = {
       events: [
         { type: 'activated', chatControl: {} },
-        { type: 'message', replyToken: 'tok', source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } },
+        { type: 'message', replyToken: 'tok', timestamp: SENT_AT, source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } },
       ],
     }
 
     const result = await handler(makeEvent(body))
 
     expect(result.statusCode).toBe(200)
-    expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok', '你好')
+    expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok', '你好', SENT_AT)
+  })
+
+  it('ignores a user event that carries no userId, rather than filing it under a shared key', async () => {
+    const body = {
+      events: [{ type: 'message', replyToken: 'tok', timestamp: SENT_AT, source: { type: 'user' }, message: { type: 'text', text: '你好' } }],
+    }
+
+    await handler(makeEvent(body))
+
+    expect(mockHandleText).not.toHaveBeenCalled()
   })
 
   it('stays out of group chats, where every member would share one memory', async () => {
@@ -215,7 +226,7 @@ describe('Lambda handler', () => {
     const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
     mockHandleText.mockRejectedValue(new Error('Anthropic chat failed: 529'))
     const body = {
-      events: [{ type: 'message', replyToken: 'tok', source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } }],
+      events: [{ type: 'message', replyToken: 'tok', timestamp: SENT_AT, source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } }],
     }
 
     await handler(makeEvent(body))
@@ -230,7 +241,7 @@ describe('Lambda handler', () => {
         {
           type: 'postback',
           replyToken: 'tok',
-          source: { type: 'user', userId: 'u1' },
+          timestamp: SENT_AT, source: { type: 'user', userId: 'u1' },
           postback: { data: 'action=casual_chat' },
         },
       ],
@@ -238,7 +249,7 @@ describe('Lambda handler', () => {
 
     await handler(makeEvent(body))
 
-    expect(mockHandlePostback).toHaveBeenCalledWith('u1', 'tok', 'action=casual_chat')
+    expect(mockHandlePostback).toHaveBeenCalledWith('u1', 'tok', 'action=casual_chat', SENT_AT)
   })
 
   const textEvent = {
@@ -246,7 +257,7 @@ describe('Lambda handler', () => {
       {
         type: 'message',
         replyToken: 'tok',
-        source: { type: 'user', userId: 'u1' },
+        timestamp: SENT_AT, source: { type: 'user', userId: 'u1' },
         message: { type: 'text', text: '你好' },
       },
     ],

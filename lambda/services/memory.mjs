@@ -86,24 +86,22 @@ export async function getContext(userId) {
   return { summary, recentTurns: turns, previousSession: null }
 }
 
-// Milliseconds that never repeat or go back within one process. A turn's
-// timestamp is its identity in the sort key, and saveTurn compares a message's
-// arrival with the last 清除記憶, so two events in the same millisecond must
-// still come out in the order they happened.
+// A turn's timestamp is its identity in the sort key, so two exchanges saved
+// in the same millisecond (two canned replies in one webhook) must not share it.
 let lastTick = 0
-export function memoryTime() {
+function nextTurnTime() {
   lastTick = Math.max(Date.now(), lastTick + 1)
-  return lastTick
+  return new Date(lastTick).toISOString()
 }
 
 /**
- * Save one exchange. receivedAt is when the user's message arrived: if
- * 清除記憶 happened after that, the exchange is taken back out and this
- * returns false.
+ * Save one exchange. sentAt is when the user sent the message, as LINE
+ * stamped it: if they confirmed 清除記憶 after that, the exchange is taken back
+ * out and this returns false.
  */
-export async function saveTurn(userId, userText, assistantText, receivedAt) {
+export async function saveTurn(userId, userText, assistantText, sentAt) {
   const pk = `USER#${userId}`
-  const ts = new Date(memoryTime()).toISOString()
+  const ts = nextTurnTime()
   const expiry = expiresAfter(RETENTION_DAYS.turns)
   const turnItem = (suffix, role, content) => ({
     ...itemKey(pk, `TURN#${ts}#${suffix}`),
@@ -121,7 +119,7 @@ export async function saveTurn(userId, userText, assistantText, receivedAt) {
   // clearMemory writes its marker before it reads what to delete, so either
   // the clear's delete sees these items or this read sees the marker.
   const cleared = await readItem(pk, 'CLEARED')
-  if (cleared && Number(cleared.clearedAt.N) > receivedAt) {
+  if (cleared && Number(cleared.clearedAt.N) > sentAt) {
     await deleteKeys(items.map(keyOf))
     return false
   }
@@ -217,16 +215,19 @@ export async function archiveSession(userId, previousSession, provider) {
 const CLEARED_MARKER_DAYS = 1
 
 /**
- * Delete all turns and the summary for a user. The marker goes first, so an
- * exchange still being answered is taken back out by saveTurn. The summary key
- * is always deleted, so a fold that commits during the clear is removed too.
+ * Delete all turns and the summary for a user. clearedAt is when the user
+ * confirmed, as LINE stamped it, so "said before the clear" follows the order
+ * the user acted in, on one clock, even when LINE redelivers a message late.
+ * The marker goes first, so an exchange still being answered is taken back out
+ * by saveTurn. The summary key is always deleted, so a fold that commits
+ * during the clear is removed too.
  */
-export async function clearMemory(userId) {
+export async function clearMemory(userId, clearedAt) {
   const pk = `USER#${userId}`
   await client.send(
     new PutItemCommand({
       TableName: TABLE,
-      Item: { ...itemKey(pk, 'CLEARED'), clearedAt: { N: String(memoryTime()) }, ttl: expiresAfter(CLEARED_MARKER_DAYS) },
+      Item: { ...itemKey(pk, 'CLEARED'), clearedAt: { N: String(clearedAt) }, ttl: expiresAfter(CLEARED_MARKER_DAYS) },
     })
   )
   const turns = []

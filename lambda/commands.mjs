@@ -10,6 +10,8 @@ const CASUAL_CHAT_STARTERS = [
   '隨意聊聊就從一句話開始\n\n最近一直卡在你心裡的那件事，從哪裡講起都可以',
 ]
 
+const CLEAR_FAILED_REPLY = '記憶還沒清乾淨，等一下再按一次「清除記憶」好嗎'
+
 const AI_SERVICE = { anthropic: 'Anthropic 的 Claude', openai: 'OpenAI 的 GPT' }[process.env.LLM_PROVIDER || 'openai']
 
 const ABOUT_MESSAGE =
@@ -21,7 +23,7 @@ const ABOUT_MESSAGE =
   '有任何建議，都歡迎寫信給我：erictu.engineer@gmail.com'
 
 const COMMANDS = {
-  '@隨意聊聊': (userId, replyToken) => handleCasualChat(userId, replyToken),
+  '@隨意聊聊': (userId, replyToken, sentAt) => handleCasualChat(userId, replyToken, sentAt),
   '@清除記憶': (userId, replyToken) => handleClearMemory(replyToken),
   '@關於': (userId, replyToken) => replyMessage(replyToken, ABOUT_MESSAGE),
 }
@@ -29,16 +31,21 @@ const COMMANDS = {
 // Only the exact menu texts are commands; "@_@ 今天好累" is a message.
 export const isCommand = (text) => Object.hasOwn(COMMANDS, text)
 
-export async function handleCommand(userId, replyToken, command) {
-  return COMMANDS[command](userId, replyToken)
+export async function handleCommand(userId, replyToken, command, sentAt) {
+  return COMMANDS[command](userId, replyToken, sentAt)
 }
 
-export async function handlePostback(userId, replyToken, data) {
+export async function handlePostback(userId, replyToken, data, sentAt) {
   if (data === 'action=casual_chat') {
-    return handleCasualChat(userId, replyToken)
+    return handleCasualChat(userId, replyToken, sentAt)
   }
   if (data === 'confirm:clear') {
-    await clearMemory(userId)
+    try {
+      await clearMemory(userId, sentAt)
+    } catch (err) {
+      await replyMessage(replyToken, CLEAR_FAILED_REPLY)
+      throw err
+    }
     return replyMessage(replyToken, '好的，記憶已清空 ✨ 我們從這裡重新開始')
   }
   if (data === 'confirm:cancel') {
@@ -46,10 +53,10 @@ export async function handlePostback(userId, replyToken, data) {
   }
 }
 
-async function handleCasualChat(userId, replyToken) {
+async function handleCasualChat(userId, replyToken, sentAt) {
   const opener =
     CASUAL_CHAT_STARTERS[Math.floor(Math.random() * CASUAL_CHAT_STARTERS.length)]
-  return replyAndRemember(userId, replyToken, '（按了選單的「隨意聊聊」）', opener)
+  return replyAndRemember(userId, replyToken, '（按了選單的「隨意聊聊」）', opener, sentAt)
 }
 
 async function handleClearMemory(replyToken) {

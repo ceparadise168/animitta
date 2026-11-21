@@ -5,7 +5,6 @@ const mockSaveTurn = jest.fn()
 const mockCompressOldTurns = jest.fn()
 const mockArchiveSession = jest.fn()
 jest.unstable_mockModule('../lambda/services/memory.mjs', () => ({
-  memoryTime: () => Date.now(),
   getContext: mockGetContext,
   saveTurn: mockSaveTurn,
   compressOldTurns: mockCompressOldTurns,
@@ -45,12 +44,12 @@ describe('chat service', () => {
     it('replies with the model text stripped of markdown and remembers the turn', async () => {
       mockProvider.chatCompletion.mockResolvedValue({ text: '佛曰：**放下**吧' })
 
-      await handleText('user1', 'token1', '我好累')
+      await handleText('user1', 'token1', '我好累', 1795270000000)
 
       expect(mockGetContext).toHaveBeenCalledWith('user1')
       expect(mockProvider.chatCompletion).toHaveBeenCalled()
       expect(mockReplyMessage).toHaveBeenCalledWith('token1', '佛曰：放下吧')
-      expect(mockSaveTurn).toHaveBeenCalledWith('user1', '我好累', '佛曰：放下吧', expect.any(Number))
+      expect(mockSaveTurn).toHaveBeenCalledWith('user1', '我好累', '佛曰：放下吧', 1795270000000)
       expect(mockCompressOldTurns).toHaveBeenCalledWith('user1', mockProvider)
     })
   })

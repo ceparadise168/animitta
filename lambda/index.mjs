@@ -47,9 +47,9 @@ export async function handler(event) {
 async function handleEvent(lineEvent) {
   // 無相界 talks one to one. Group and room events would all share one memory,
   // and channel events (activation, for one) carry no source at all.
-  if (lineEvent.source?.type !== 'user') return
+  if (lineEvent.source?.type !== 'user' || !lineEvent.source.userId) return
+  const { replyToken, timestamp: sentAt } = lineEvent
   const userId = lineEvent.source.userId
-  const replyToken = lineEvent.replyToken
 
   try {
     if (lineEvent.type === 'follow') {
@@ -59,18 +59,18 @@ async function handleEvent(lineEvent) {
         linkRichMenu(userId, process.env.RICH_MENU_ID).catch(() => {})
       }
     } else if (lineEvent.type === 'postback') {
-      await handlePostback(userId, replyToken, lineEvent.postback.data)
+      await handlePostback(userId, replyToken, lineEvent.postback.data, sentAt)
     } else if (lineEvent.type === 'message') {
       const msg = lineEvent.message
 
       if (msg.type === 'text' && isCommand(msg.text)) {
-        await handleCommand(userId, replyToken, msg.text)
+        await handleCommand(userId, replyToken, msg.text, sentAt)
       } else if (msg.type === 'text') {
-        await handleText(userId, replyToken, msg.text)
+        await handleText(userId, replyToken, msg.text, sentAt)
       } else if (msg.type === 'sticker') {
-        await handleText(userId, replyToken, stickerAsText(msg))
+        await handleText(userId, replyToken, stickerAsText(msg), sentAt)
       } else if (UNREADABLE_MESSAGES[msg.type]) {
-        await replyAndRemember(userId, replyToken, UNREADABLE_MESSAGES[msg.type], TEXT_ONLY_REPLY)
+        await replyAndRemember(userId, replyToken, UNREADABLE_MESSAGES[msg.type], TEXT_ONLY_REPLY, sentAt)
       }
     }
   } catch (err) {
