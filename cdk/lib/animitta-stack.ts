@@ -40,6 +40,7 @@ export class AnimittaStack extends cdk.Stack {
         CHAT_MODEL_OPENAI: process.env.CHAT_MODEL_OPENAI || 'gpt-4.1-mini',
         SUMMARY_MODEL_OPENAI: process.env.SUMMARY_MODEL_OPENAI || 'gpt-4.1-mini',
         CHAT_MODEL_ANTHROPIC: process.env.CHAT_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001',
+        CHAT_EFFORT_ANTHROPIC: process.env.CHAT_EFFORT_ANTHROPIC || '',
         SUMMARY_MODEL_ANTHROPIC: process.env.SUMMARY_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001',
         LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
         LINE_CHANNEL_SECRET: process.env.LINE_CHANNEL_SECRET || '',

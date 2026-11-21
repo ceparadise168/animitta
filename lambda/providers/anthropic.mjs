@@ -4,6 +4,7 @@ export class AnthropicProvider extends LlmProvider {
   #apiKey
   #openAiKey
   #chatModel
+  #chatEffort
   #summaryModel
 
   constructor() {
@@ -12,6 +13,7 @@ export class AnthropicProvider extends LlmProvider {
     this.#openAiKey = process.env.OPENAI_API_KEY
     this.#chatModel =
       process.env.CHAT_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
+    this.#chatEffort = process.env.CHAT_EFFORT_ANTHROPIC || null
     this.#summaryModel =
       process.env.SUMMARY_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
   }
@@ -28,15 +30,22 @@ export class AnthropicProvider extends LlmProvider {
       },
       body: JSON.stringify({
         model: this.#chatModel,
-        max_tokens: 1024,
-        temperature: 0.8,
+        ...this.#chatTuning(),
         ...(system && { system }),
         messages: userMessages,
       }),
     })
     if (!res.ok) throw new Error(`Anthropic chat failed: ${res.status}`)
     const data = await res.json()
-    return parseChatContent(data.content[0].text)
+    return parseChatContent(readReplyText(data))
+  }
+
+  // Claude 4.6+ models reject temperature and think before answering; they are
+  // tuned with effort instead, and need max_tokens room for the thinking.
+  #chatTuning() {
+    return this.#chatEffort
+      ? { max_tokens: 16000, output_config: { effort: this.#chatEffort } }
+      : { max_tokens: 1024, temperature: 0.8 }
   }
 
   async summarize(existingSummary, turns) {
@@ -131,6 +140,15 @@ export class AnthropicProvider extends LlmProvider {
       userMessages: merged,
     }
   }
+}
+
+function readReplyText(data) {
+  if (data.stop_reason === 'refusal') {
+    throw new Error(`Anthropic chat refused: ${data.stop_details?.category ?? 'unknown'}`)
+  }
+  const text = data.content.find((block) => block.type === 'text')?.text
+  if (!text) throw new Error(`Anthropic chat returned no text (stop_reason: ${data.stop_reason})`)
+  return text
 }
 
 function parseChatContent(content) {
