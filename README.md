@@ -38,7 +38,7 @@ LINE App → Lambda Function URL → Lambda (Node.js 22.x) → OpenAI / Anthropi
 - Stickers are answered: LINE's sticker keywords (and the text on message stickers) go to the model
 - Voice, photos, videos, files and locations get a short "I can only read text" reply, which is remembered
 - Conversation memory: the last turns, plus an LLM-compressed summary for long-term context. After `SESSION_IDLE_HOURS` of silence a new session starts and the previous one comes back as background
-- Retention: remembered turns expire `CONVERSATION_TTL_DAYS` (30) after they were said; the summary expires `SUMMARY_TTL_DAYS` (90) after the last message. 關於 tells users both numbers
+- Retention: everything remembered about someone is gone `CONVERSATION_TTL_DAYS` (90) days after their last message. Each turn expires that long after it was said, the summary that long after the latest exchange. 關於 quotes the number
 - Alerts: failed replies email `ALERT_EMAIL`; reminders go out before `ANTHROPIC_KEY_EXPIRES_ON`
 
 ## Quick Start
@@ -80,7 +80,7 @@ Key variables:
 - `LLM_PROVIDER`: `openai` or `anthropic`
 - `CHAT_MODEL_OPENAI`: Model for conversation (e.g., `gpt-4.1-mini`)
 - `MAX_RECENT_TURNS`: Number of recent conversation turns to keep (default: 5)
-- `CONVERSATION_TTL_DAYS` / `SUMMARY_TTL_DAYS`: How long turns and the summary are kept (defaults: 30 / 90)
+- `CONVERSATION_TTL_DAYS`: Days without a message after which everything remembered is deleted (default: 90). 關於 quotes it to users
 
 ## Project Structure
 

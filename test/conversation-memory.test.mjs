@@ -9,8 +9,7 @@ process.env.LINE_CHANNEL_SECRET = 'test-secret'
 process.env.MEMORY_TABLE_NAME = 'test-table'
 process.env.MAX_RECENT_TURNS = '5'
 process.env.SESSION_IDLE_HOURS = '2'
-process.env.CONVERSATION_TTL_DAYS = '30'
-process.env.SUMMARY_TTL_DAYS = '90'
+process.env.CONVERSATION_TTL_DAYS = '90'
 process.env.LLM_PROVIDER = 'anthropic'
 process.env.ANTHROPIC_API_KEY = 'test-key'
 
@@ -209,7 +208,20 @@ describe('conversation memory, end to end', () => {
     it('keeps each turn for CONVERSATION_TTL_DAYS after it was said', async () => {
       await sendText('嗨')
 
-      for (const row of turnRows()) expectExpiryInDays(row.ttl, 30)
+      for (const row of turnRows()) expectExpiryInDays(row.ttl, 90)
+    })
+
+    it('still picks up the last conversation when someone comes back after 45 days', async () => {
+      await sendText('我媽昨天住院了')
+      const later = Date.now() + 45 * DAY * 1000
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(later)
+      try {
+        await sendText('她今天出院了', later)
+      } finally {
+        clock.mockRestore()
+      }
+
+      expect(everythingSent(chatRequests[1])).toContain('我媽昨天住院了')
     })
 
     it('creates no summary for a new user, and their next message still works', async () => {
@@ -236,7 +248,7 @@ describe('conversation memory, end to end', () => {
       expect(Number(summaryRow().ttl.N)).toBeLessThan(nowSeconds())
     })
 
-    it('keeps the summary for SUMMARY_TTL_DAYS after the last message, not after it was written', async () => {
+    it('keeps the summary for CONVERSATION_TTL_DAYS after the last message, not after it was written', async () => {
       putSummary('使用者提過他在準備轉職', secondsFromNow(3 * DAY))
 
       await sendText('最近還是很猶豫')

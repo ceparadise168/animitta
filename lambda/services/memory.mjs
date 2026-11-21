@@ -13,13 +13,11 @@ const TABLE = process.env.MEMORY_TABLE_NAME
 const MAX_TURNS = parseInt(process.env.MAX_RECENT_TURNS || '5', 10)
 const SESSION_IDLE_HOURS = parseFloat(process.env.SESSION_IDLE_HOURS || '2')
 
-// How long the bot keeps what it remembers. A turn expires this many days
-// after it was said; the summary this many days after the user's last message.
-// The 關於 message quotes these numbers to users.
-export const RETENTION_DAYS = {
-  turns: parseInt(process.env.CONVERSATION_TTL_DAYS || '30', 10),
-  summary: parseInt(process.env.SUMMARY_TTL_DAYS || '90', 10),
-}
+// Everything the bot remembers about someone is gone this many days after
+// their last message: each turn expires this long after it was said, and the
+// summary this long after the latest exchange. One number, so the promise the
+// 關於 message quotes to users cannot drift between the two.
+export const RETENTION_DAYS = parseInt(process.env.CONVERSATION_TTL_DAYS || '90', 10)
 
 const nowSeconds = () => Math.floor(Date.now() / 1000)
 const expiresAfter = (days) => ({ N: String(nowSeconds() + days * 86400) })
@@ -102,7 +100,7 @@ function nextTurnTime() {
 export async function saveTurn(userId, userText, assistantText, sentAt) {
   const pk = `USER#${userId}`
   const ts = nextTurnTime()
-  const expiry = expiresAfter(RETENTION_DAYS.turns)
+  const expiry = expiresAfter(RETENTION_DAYS)
   const turnItem = (suffix, role, content) => ({
     ...itemKey(pk, `TURN#${ts}#${suffix}`),
     role: { S: role },
@@ -126,7 +124,7 @@ export async function saveTurn(userId, userText, assistantText, sentAt) {
   return true
 }
 
-// The summary is forgotten SUMMARY_TTL_DAYS after the last message, not after
+// The summary is forgotten RETENTION_DAYS after the last message, not after
 // it was last rewritten, so every exchange pushes its expiry out. An expired
 // summary that DynamoDB has not removed yet must stay expired. A fold in flight
 // conflicts with this update, and writes a fresh expiry itself.
@@ -140,7 +138,7 @@ async function keepSummaryAlive(pk) {
         ConditionExpression: 'attribute_exists(pk) AND #ttl > :now',
         ExpressionAttributeNames: { '#ttl': 'ttl' },
         ExpressionAttributeValues: {
-          ':ttl': expiresAfter(RETENTION_DAYS.summary),
+          ':ttl': expiresAfter(RETENTION_DAYS),
           ':now': { N: String(nowSeconds()) },
         },
       })
@@ -171,7 +169,7 @@ async function foldIntoSummary(pk, items, provider) {
                 ...itemKey(pk, 'SUMMARY'),
                 content: { S: summary },
                 updatedAt: { S: new Date().toISOString() },
-                ttl: expiresAfter(RETENTION_DAYS.summary),
+                ttl: expiresAfter(RETENTION_DAYS),
               },
               ...(before
                 ? { ConditionExpression: 'updatedAt = :seen', ExpressionAttributeValues: { ':seen': before.updatedAt } }
