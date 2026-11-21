@@ -72,7 +72,7 @@ describe('memory service', () => {
     it('writes the user and bot items, each expiring CONVERSATION_TTL_DAYS from now', async () => {
       mockSend.mockResolvedValue({})
 
-      await saveTurn('user123', '你好', '嗨～')
+      await saveTurn('user123', '你好', '嗨～', Date.now())
 
       const puts = mockSend.mock.calls.map(([cmd]) => cmd).filter((cmd) => cmd._type === 'PutItem')
       expect(puts.map((cmd) => [cmd.Item.role.S, cmd.Item.content.S])).toEqual([
@@ -83,13 +83,22 @@ describe('memory service', () => {
       for (const cmd of puts) expect(Number(cmd.Item.ttl.N)).toBeGreaterThanOrEqual(in30Days - 5)
     })
 
+    it('still saves the turn when a fold is rewriting the summary at the same moment', async () => {
+      mockSend.mockImplementation(async (cmd) => {
+        if (cmd._type === 'UpdateItem') throw Object.assign(new Error('Transaction is ongoing for the item'), { name: 'TransactionConflictException' })
+        return {}
+      })
+
+      await expect(saveTurn('user123', '你好', '嗨～', Date.now())).resolves.toBe(true)
+    })
+
     it('still saves the turn when the user has no summary yet', async () => {
       mockSend.mockImplementation(async (cmd) => {
         if (cmd._type === 'UpdateItem') throw Object.assign(new Error('The conditional request failed'), { name: 'ConditionalCheckFailedException' })
         return {}
       })
 
-      await expect(saveTurn('user123', '你好', '嗨～')).resolves.toBeUndefined()
+      await expect(saveTurn('user123', '你好', '嗨～', Date.now())).resolves.toBe(true)
     })
   })
 })

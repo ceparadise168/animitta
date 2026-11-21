@@ -24,7 +24,7 @@ const lineReplies = []
 const usedReplyTokens = new Set()
 // Like the real summarizer, the result carries the old summary forward.
 const echoSummary = async (old, folded) => `${old ? `${old}｜` : ''}摘要：${folded}`
-const llm = { summarize: echoSummary }
+const llm = { summarize: echoSummary, beforeChatReply: async () => {} }
 global.fetch = async (url, init) => {
   const ok = (body) => ({ ok: true, status: 200, json: async () => body })
   if (String(url).endsWith('/v2/bot/message/reply')) {
@@ -38,6 +38,7 @@ global.fetch = async (url, init) => {
   const body = JSON.parse(init.body)
   if (body.system) {
     chatRequests.push(body)
+    await llm.beforeChatReply()
     return ok({ stop_reason: 'end_turn', content: [{ type: 'text', text: '（模型的回覆）' }] })
   }
   const prompt = body.messages[0].content
@@ -50,6 +51,7 @@ global.fetch = async (url, init) => {
 }
 
 const { handler } = await import('../lambda/index.mjs')
+const memory = await import('../lambda/services/memory.mjs')
 
 const USER = 'U-memory'
 const PK = `USER#${USER}`
@@ -59,7 +61,7 @@ const secondsFromNow = (s) => ({ N: String(nowSeconds() + s) })
 
 let replyTokens = 0
 function send(event) {
-  const body = JSON.stringify({ events: [{ replyToken: `rt-${++replyTokens}`, source: { userId: USER }, ...event }] })
+  const body = JSON.stringify({ events: [{ replyToken: `rt-${++replyTokens}`, source: { type: 'user', userId: USER }, ...event }] })
   const signature = createHmac('SHA256', 'test-secret').update(body).digest('base64')
   return handler({ body, headers: { 'x-line-signature': signature } })
 }
@@ -84,6 +86,7 @@ function putSummary(content, ttl) {
 }
 const summaryRow = () => rows.get(`${PK}|SUMMARY`)
 const turnRows = () => [...rows.values()].filter((r) => r.sk.S.startsWith('TURN#'))
+const rememberedRows = () => [...rows.values()].filter((r) => r.sk.S !== 'CLEARED')
 const everythingSent = (request) => [request.system, ...request.messages.map((m) => m.content)].join('\n')
 const expectExpiryInDays = (ttl, days) => expect(Math.abs(Number(ttl.N) - (nowSeconds() + days * DAY))).toBeLessThan(60)
 
@@ -93,7 +96,10 @@ describe('conversation memory, end to end', () => {
     chatRequests.length = 0
     lineReplies.length = 0
     llm.summarize = echoSummary
+    llm.beforeChatReply = async () => {}
     hooks.beforeTransaction = async () => {}
+    hooks.queryPageSize = Infinity
+    hooks.unprocessedBatches = 0
   })
 
   describe('sessions', () => {
@@ -280,7 +286,8 @@ describe('conversation memory, end to end', () => {
       logged.mockRestore()
     })
 
-    it('does not bring memory back when 清除記憶 lands while a fold is being written', async () => {
+    it('does not bring memory back when 清除記憶 lands while a fold is being written, and does not page anyone', async () => {
+      const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
       putTurn(185, '我在考慮離婚', '嗯，這個很重')
       hooks.beforeTransaction = async () => {
         hooks.beforeTransaction = async () => {}
@@ -290,9 +297,106 @@ describe('conversation memory, end to end', () => {
       await sendText('今天又想了一整天')
 
       expect(lineReplies).toContain('好的，記憶已清空 ✨ 我們從這裡重新開始')
-      expect([...rows.values()]).toEqual([])
+      expect(rememberedRows()).toEqual([])
+      expect(logged).not.toHaveBeenCalledWith('Handler error:', expect.anything())
+      logged.mockRestore()
       await sendText('嗨')
       expect(everythingSent(chatRequests[1])).not.toContain('離婚')
+    })
+
+    it('forgets a message whose reply was still being written when 清除記憶 landed', async () => {
+      putTurn(10, '我在考慮離婚', '嗯')
+      llm.beforeChatReply = async () => {
+        llm.beforeChatReply = async () => {}
+        await confirmClear()
+      }
+
+      await sendText('我老公又沒回家')
+
+      expect(turnRows()).toEqual([])
+      await sendText('嗨')
+      expect(everythingSent(chatRequests[1])).not.toContain('我老公又沒回家')
+    })
+
+    it('remembers a message that arrived after 清除記憶', async () => {
+      putTurn(10, '我在考慮離婚', '嗯')
+      await confirmClear()
+
+      await sendText('我想重新開始')
+      await sendText('嗨')
+
+      expect(everythingSent(chatRequests[1])).toContain('我想重新開始')
+      expect(everythingSent(chatRequests[1])).not.toContain('離婚')
+    })
+
+    it('清除記憶 forgets the summary too', async () => {
+      putSummary('使用者提過他在準備轉職', secondsFromNow(30 * DAY))
+      putTurn(10, '嗨', '嗨')
+
+      await confirmClear()
+
+      expect(rememberedRows()).toEqual([])
+    })
+
+    it('清除記憶 reads every page and retries deletes DynamoDB hands back', async () => {
+      for (let i = 0; i < 8; i++) putTurn(60 - i, `第${i}句`, `回${i}`)
+      hooks.queryPageSize = 3
+      hooks.unprocessedBatches = 1
+
+      await confirmClear()
+
+      expect(rememberedRows()).toEqual([])
+      expect(lineReplies).toEqual(['好的，記憶已清空 ✨ 我們從這裡重新開始'])
+    })
+
+    it('does not say memory was cleared when DynamoDB keeps refusing the deletes', async () => {
+      const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+      putTurn(10, '嗨', '嗨')
+      hooks.unprocessedBatches = 100
+
+      await confirmClear()
+
+      expect(lineReplies).not.toContain('好的，記憶已清空 ✨ 我們從這裡重新開始')
+      expect(lineReplies[0]).toContain('暫時卡住')
+      logged.mockRestore()
+    })
+
+    it('folds a previous session longer than what the model was shown, so none of it comes back as live turns', async () => {
+      for (let i = 0; i < 6; i++) putTurn(300 - i, `舊${i}`, `舊回${i}`)
+
+      await sendText('新的一天')
+      await sendText('第二句')
+
+      expect(summaryRow().content.S).toContain('舊0')
+      expect(chatRequests[1].messages.map((m) => m.content)).toEqual(['新的一天', '（模型的回覆）', '第二句'])
+    })
+
+    it('folds a backlog bigger than one transaction a step at a time', async () => {
+      for (let i = 0; i < 60; i++) putTurn(100 - i, `第${i}句`, `回${i}`)
+
+      await sendText('還在嗎')
+
+      expect(lineReplies).toEqual(['（模型的回覆）'])
+      expect(summaryRow().content.S).toContain('第0句')
+      expect(turnRows()).toHaveLength(122 - 98)
+    })
+
+    it('loses nothing when two folds of different turns race', async () => {
+      putSummary('S0', secondsFromNow(30 * DAY))
+      putTurn(300, 'K1', 'K1回')
+      const earlier = { endsAt: [...rows.values()].find((r) => r.content.S === 'K1').sk.S.split('#')[1] }
+      putTurn(20, 'K2', 'K2回')
+      for (let i = 0; i < 5; i++) putTurn(10 - i, `近${i}`, `近回${i}`)
+      hooks.beforeTransaction = async () => {
+        hooks.beforeTransaction = async () => {}
+        await memory.compressOldTurns(USER, { summarize: async (old, ts) => echoSummary(old, ts.map((t) => t.content).join(',')) })
+      }
+
+      await memory.archiveSession(USER, earlier, { summarize: async (old, ts) => echoSummary(old, ts.map((t) => t.content).join(',')) })
+
+      const kept = [summaryRow().content.S, ...turnRows().map((r) => r.content.S)].join('|')
+      expect(kept).toContain('K1')
+      expect(kept).toContain('K2')
     })
   })
 })

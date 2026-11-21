@@ -27,7 +27,7 @@ const expiresAfter = (days) => ({ N: String(nowSeconds() + days * 86400) })
 // reads skip them too. Otherwise the retention promise would not hold.
 const isLive = (item) => !item.ttl || Number(item.ttl.N) > nowSeconds()
 
-const summaryKey = (pk) => ({ pk: { S: pk }, sk: { S: 'SUMMARY' } })
+const itemKey = (pk, sk) => ({ pk: { S: pk }, sk: { S: sk } })
 const keyOf = (item) => ({ pk: item.pk, sk: item.sk })
 
 // Both items of a turn share one timestamp in their sort key (TURN#<iso>#user,
@@ -60,11 +60,9 @@ async function liveTurns(pk, { newestFirst = false, limit } = {}) {
   return inConversationOrder((res.Items || []).filter(isLive))
 }
 
-async function readSummaryItem(pk) {
-  const res = await client.send(
-    new GetItemCommand({ TableName: TABLE, Key: summaryKey(pk), ConsistentRead: true })
-  )
-  return res.Item ?? null
+async function readItem(pk, sk) {
+  const res = await client.send(new GetItemCommand({ TableName: TABLE, Key: itemKey(pk, sk), ConsistentRead: true }))
+  return res.Item
 }
 const liveContent = (summaryItem) => (summaryItem && isLive(summaryItem) ? summaryItem.content.S : null)
 
@@ -72,7 +70,7 @@ export async function getContext(userId) {
   const pk = `USER#${userId}`
   const [items, summaryItem] = await Promise.all([
     liveTurns(pk, { newestFirst: true, limit: MAX_TURNS * 2 }),
-    readSummaryItem(pk),
+    readItem(pk, 'SUMMARY'),
   ])
   const turns = items.map(toMessage)
   const summary = liveContent(summaryItem)
@@ -83,47 +81,63 @@ export async function getContext(userId) {
   const lastAt = items.length ? Date.parse(turnTime(items.at(-1))) : null
   const idleMs = lastAt === null ? 0 : Date.now() - lastAt
   if (idleMs > SESSION_IDLE_HOURS * 3600 * 1000) {
-    return { summary, recentTurns: [], previousSession: { turns, idleMs, keys: items.map(keyOf) } }
+    return { summary, recentTurns: [], previousSession: { turns, idleMs, endsAt: turnTime(items.at(-1)) } }
   }
   return { summary, recentTurns: turns, previousSession: null }
 }
 
-// The timestamp is the turn's identity in its sort key, so two exchanges saved
-// in the same millisecond (two canned replies in one webhook) must not share it.
-let lastSavedAt = 0
-function nextTurnTime() {
-  lastSavedAt = Math.max(Date.now(), lastSavedAt + 1)
-  return new Date(lastSavedAt).toISOString()
+// Milliseconds that never repeat or go back within one process. A turn's
+// timestamp is its identity in the sort key, and saveTurn compares a message's
+// arrival with the last 清除記憶, so two events in the same millisecond must
+// still come out in the order they happened.
+let lastTick = 0
+export function memoryTime() {
+  lastTick = Math.max(Date.now(), lastTick + 1)
+  return lastTick
 }
 
-export async function saveTurn(userId, userText, assistantText) {
+/**
+ * Save one exchange. receivedAt is when the user's message arrived: if
+ * 清除記憶 happened after that, the exchange is taken back out and this
+ * returns false.
+ */
+export async function saveTurn(userId, userText, assistantText, receivedAt) {
   const pk = `USER#${userId}`
-  const ts = nextTurnTime()
+  const ts = new Date(memoryTime()).toISOString()
   const expiry = expiresAfter(RETENTION_DAYS.turns)
   const turnItem = (suffix, role, content) => ({
-    pk: { S: pk },
-    sk: { S: `TURN#${ts}#${suffix}` },
+    ...itemKey(pk, `TURN#${ts}#${suffix}`),
     role: { S: role },
     content: { S: content },
     ttl: expiry,
   })
+  const items = [turnItem('user', 'user', userText), turnItem('asst', 'assistant', assistantText)]
 
   await Promise.all([
-    client.send(new PutItemCommand({ TableName: TABLE, Item: turnItem('user', 'user', userText) })),
-    client.send(new PutItemCommand({ TableName: TABLE, Item: turnItem('asst', 'assistant', assistantText) })),
+    ...items.map((Item) => client.send(new PutItemCommand({ TableName: TABLE, Item }))),
     keepSummaryAlive(pk),
   ])
+
+  // clearMemory writes its marker before it reads what to delete, so either
+  // the clear's delete sees these items or this read sees the marker.
+  const cleared = await readItem(pk, 'CLEARED')
+  if (cleared && Number(cleared.clearedAt.N) > receivedAt) {
+    await deleteKeys(items.map(keyOf))
+    return false
+  }
+  return true
 }
 
 // The summary is forgotten SUMMARY_TTL_DAYS after the last message, not after
 // it was last rewritten, so every exchange pushes its expiry out. An expired
-// summary that DynamoDB has not removed yet must stay expired.
+// summary that DynamoDB has not removed yet must stay expired. A fold in flight
+// conflicts with this update, and writes a fresh expiry itself.
 async function keepSummaryAlive(pk) {
   try {
     await client.send(
       new UpdateItemCommand({
         TableName: TABLE,
-        Key: summaryKey(pk),
+        Key: itemKey(pk, 'SUMMARY'),
         UpdateExpression: 'SET #ttl = :ttl',
         ConditionExpression: 'attribute_exists(pk) AND #ttl > :now',
         ExpressionAttributeNames: { '#ttl': 'ttl' },
@@ -134,20 +148,20 @@ async function keepSummaryAlive(pk) {
       })
     )
   } catch (err) {
-    if (err.name !== 'ConditionalCheckFailedException') throw err
+    if (err.name !== 'ConditionalCheckFailedException' && err.name !== 'TransactionConflictException') throw err
   }
 }
 
 // TransactWriteItems takes at most 100 actions, and one of them is the summary.
 const MAX_FOLDED_ITEMS = 98
 
-// Folds exactly the turns that were read into the summary, in one transaction:
-// the new summary is written and those turns deleted only if all of them still
-// exist and nobody rewrote or cleared the summary while the model was writing
-// it. Otherwise a 清除記憶 that landed mid-fold would be undone.
-async function foldIntoSummary(pk, { turns, keys }, provider) {
-  const before = await readSummaryItem(pk)
-  const summary = await provider.summarize(liveContent(before), turns)
+// Folds the given turns into the summary in one transaction: the new summary
+// is written and those turns deleted only if all of them still exist and
+// nobody rewrote or cleared the summary while the model was writing it.
+// Otherwise a 清除記憶 that landed mid-fold would be undone.
+async function foldIntoSummary(pk, items, provider) {
+  const before = await readItem(pk, 'SUMMARY')
+  const summary = await provider.summarize(liveContent(before), items.map(toMessage))
   try {
     await client.send(
       new TransactWriteItemsCommand({
@@ -156,7 +170,7 @@ async function foldIntoSummary(pk, { turns, keys }, provider) {
             Put: {
               TableName: TABLE,
               Item: {
-                ...summaryKey(pk),
+                ...itemKey(pk, 'SUMMARY'),
                 content: { S: summary },
                 updatedAt: { S: new Date().toISOString() },
                 ttl: expiresAfter(RETENTION_DAYS.summary),
@@ -166,8 +180,8 @@ async function foldIntoSummary(pk, { turns, keys }, provider) {
                 : { ConditionExpression: 'attribute_not_exists(pk)' }),
             },
           },
-          ...keys.map((Key) => ({
-            Delete: { TableName: TABLE, Key, ConditionExpression: 'attribute_exists(sk)' },
+          ...items.map((item) => ({
+            Delete: { TableName: TABLE, Key: keyOf(item), ConditionExpression: 'attribute_exists(sk)' },
           })),
         ],
       })
@@ -184,47 +198,66 @@ async function foldIntoSummary(pk, { turns, keys }, provider) {
 export async function compressOldTurns(userId, provider) {
   const pk = `USER#${userId}`
   const items = await liveTurns(pk)
-  const overflowCount = Math.min(Math.max(items.length - MAX_TURNS * 2, 0), MAX_FOLDED_ITEMS)
-  const overflow = items.slice(0, overflowCount)
-  if (overflow.length > 0) {
-    await foldIntoSummary(pk, { turns: overflow.map(toMessage), keys: overflow.map(keyOf) }, provider)
-  }
+  const overflowCount = Math.min(items.length - MAX_TURNS * 2, MAX_FOLDED_ITEMS)
+  if (overflowCount > 0) await foldIntoSummary(pk, items.slice(0, overflowCount), provider)
 }
 
 /**
- * Fold the previous session, exactly as getContext read it, into the rolling
- * summary, so the next session starts fresh while keeping long-term context.
+ * Fold every turn of the previous session into the rolling summary, so the
+ * next session starts fresh while keeping long-term context. getContext only
+ * showed its newest turns; a backlog left by a failed fold goes along too.
  */
 export async function archiveSession(userId, previousSession, provider) {
-  await foldIntoSummary(`USER#${userId}`, previousSession, provider)
+  const pk = `USER#${userId}`
+  const items = (await liveTurns(pk)).filter((item) => turnTime(item) <= previousSession.endsAt)
+  if (items.length > 0) await foldIntoSummary(pk, items.slice(0, MAX_FOLDED_ITEMS), provider)
 }
 
+// Long enough to outlast any exchange that was in flight when the user cleared.
+const CLEARED_MARKER_DAYS = 1
+
 /**
- * Delete all turns and summary for a user. The summary key is always included,
- * so a fold that commits between the query and the delete is removed too.
+ * Delete all turns and the summary for a user. The marker goes first, so an
+ * exchange still being answered is taken back out by saveTurn. The summary key
+ * is always deleted, so a fold that commits during the clear is removed too.
  */
 export async function clearMemory(userId) {
   const pk = `USER#${userId}`
-  const res = await client.send(
-    new QueryCommand({
+  await client.send(
+    new PutItemCommand({
       TableName: TABLE,
-      KeyConditionExpression: 'pk = :pk',
-      ExpressionAttributeValues: { ':pk': { S: pk } },
-      ConsistentRead: true,
+      Item: { ...itemKey(pk, 'CLEARED'), clearedAt: { N: String(memoryTime()) }, ttl: expiresAfter(CLEARED_MARKER_DAYS) },
     })
   )
-  const turns = (res.Items || []).filter((item) => item.sk.S !== 'SUMMARY')
-  await deleteKeys([...turns.map(keyOf), summaryKey(pk)])
-}
-
-async function deleteKeys(keys) {
-  for (let i = 0; i < keys.length; i += 25) {
-    await client.send(
-      new BatchWriteItemCommand({
-        RequestItems: {
-          [TABLE]: keys.slice(i, i + 25).map((Key) => ({ DeleteRequest: { Key } })),
-        },
+  const turns = []
+  let startKey
+  do {
+    const page = await client.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
+        ExpressionAttributeValues: { ':pk': { S: pk }, ':prefix': { S: 'TURN#' } },
+        ConsistentRead: true,
+        ExclusiveStartKey: startKey,
       })
     )
+    turns.push(...(page.Items || []))
+    startKey = page.LastEvaluatedKey
+  } while (startKey)
+  await deleteKeys([...turns.map(keyOf), itemKey(pk, 'SUMMARY')])
+}
+
+// BatchWriteItem may hand back deletes it did not do (throttling, internal
+// errors). They are retried, and if they never go through this throws, so the
+// user is not told their memory was cleared when it was not.
+async function deleteKeys(keys) {
+  for (let i = 0; i < keys.length; i += 25) {
+    let requests = keys.slice(i, i + 25).map((Key) => ({ DeleteRequest: { Key } }))
+    for (let attempt = 0; requests.length > 0; attempt++) {
+      if (attempt === 4) throw new Error(`DynamoDB left ${requests.length} delete(s) unprocessed`)
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt))
+      const res = await client.send(new BatchWriteItemCommand({ RequestItems: { [TABLE]: requests } }))
+      requests = res.UnprocessedItems?.[TABLE] ?? []
+    }
   }
 }

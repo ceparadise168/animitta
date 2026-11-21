@@ -5,6 +5,7 @@ const mockSaveTurn = jest.fn()
 const mockCompressOldTurns = jest.fn()
 const mockArchiveSession = jest.fn()
 jest.unstable_mockModule('../lambda/services/memory.mjs', () => ({
+  memoryTime: () => Date.now(),
   getContext: mockGetContext,
   saveTurn: mockSaveTurn,
   compressOldTurns: mockCompressOldTurns,
@@ -35,7 +36,7 @@ describe('chat service', () => {
     jest.clearAllMocks()
     mockGetProvider.mockReturnValue(mockProvider)
     mockGetContext.mockResolvedValue({ summary: null, recentTurns: [], previousSession: null })
-    mockSaveTurn.mockResolvedValue(undefined)
+    mockSaveTurn.mockResolvedValue(true)
     mockCompressOldTurns.mockResolvedValue(undefined)
     mockReplyMessage.mockResolvedValue(undefined)
   })
@@ -49,7 +50,7 @@ describe('chat service', () => {
       expect(mockGetContext).toHaveBeenCalledWith('user1')
       expect(mockProvider.chatCompletion).toHaveBeenCalled()
       expect(mockReplyMessage).toHaveBeenCalledWith('token1', '佛曰：放下吧')
-      expect(mockSaveTurn).toHaveBeenCalledWith('user1', '我好累', '佛曰：放下吧')
+      expect(mockSaveTurn).toHaveBeenCalledWith('user1', '我好累', '佛曰：放下吧', expect.any(Number))
       expect(mockCompressOldTurns).toHaveBeenCalledWith('user1', mockProvider)
     })
   })
