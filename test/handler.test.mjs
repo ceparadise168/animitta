@@ -52,7 +52,7 @@ describe('Lambda handler', () => {
         {
           type: 'message',
           replyToken: 'tok',
-          source: { userId: 'u1' },
+          source: { type: 'user', userId: 'u1' },
           message: { type: 'text', text: '你好' },
         },
       ],
@@ -70,7 +70,7 @@ describe('Lambda handler', () => {
         {
           type: 'message',
           replyToken: 'tok',
-          source: { userId: 'u1' },
+          source: { type: 'user', userId: 'u1' },
           message: { type: 'audio', id: 'audio123' },
         },
       ],
@@ -84,7 +84,7 @@ describe('Lambda handler', () => {
 
   it('asks for text when a photo arrives, and remembers that a photo came', async () => {
     const body = {
-      events: [{ type: 'message', replyToken: 'tok', source: { userId: 'u1' }, message: { type: 'image', id: 'img1' } }],
+      events: [{ type: 'message', replyToken: 'tok', source: { type: 'user', userId: 'u1' }, message: { type: 'image', id: 'img1' } }],
     }
 
     await handler(makeEvent(body))
@@ -94,7 +94,7 @@ describe('Lambda handler', () => {
 
   it('passes a sticker to the model as words, from its keywords and text', async () => {
     const sticker = (message) => ({
-      events: [{ type: 'message', replyToken: 'tok', source: { userId: 'u1' }, message: { type: 'sticker', ...message } }],
+      events: [{ type: 'message', replyToken: 'tok', source: { type: 'user', userId: 'u1' }, message: { type: 'sticker', ...message } }],
     })
 
     await handler(makeEvent(sticker({ keywords: ['cry', 'sad'] })))
@@ -111,8 +111,8 @@ describe('Lambda handler', () => {
   it('handles every event in one webhook, including other users', async () => {
     const body = {
       events: [
-        { type: 'message', replyToken: 'tok-a', source: { userId: 'u1' }, message: { type: 'text', text: '你好' } },
-        { type: 'message', replyToken: 'tok-b', source: { userId: 'u2' }, message: { type: 'text', text: '嗨' } },
+        { type: 'message', replyToken: 'tok-a', source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } },
+        { type: 'message', replyToken: 'tok-b', source: { type: 'user', userId: 'u2' }, message: { type: 'text', text: '嗨' } },
       ],
     }
 
@@ -127,8 +127,8 @@ describe('Lambda handler', () => {
     mockReplyMessage.mockResolvedValue(undefined)
     const body = {
       events: [
-        { type: 'message', replyToken: 'tok-a', source: { userId: 'u1' }, message: { type: 'text', text: '你好' } },
-        { type: 'message', replyToken: 'tok-b', source: { userId: 'u2' }, message: { type: 'text', text: '嗨' } },
+        { type: 'message', replyToken: 'tok-a', source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } },
+        { type: 'message', replyToken: 'tok-b', source: { type: 'user', userId: 'u2' }, message: { type: 'text', text: '嗨' } },
       ],
     }
 
@@ -163,7 +163,7 @@ describe('Lambda handler', () => {
         {
           type: 'message',
           replyToken: 'tok',
-          source: { userId: 'u1' },
+          source: { type: 'user', userId: 'u1' },
           message: { type: 'text', text: '@隨意聊聊' },
         },
       ],
@@ -177,7 +177,7 @@ describe('Lambda handler', () => {
 
   it('treats text that only starts with @ as a message, not a command', async () => {
     const body = {
-      events: [{ type: 'message', replyToken: 'tok', source: { userId: 'u1' }, message: { type: 'text', text: '@_@ 今天好累' } }],
+      events: [{ type: 'message', replyToken: 'tok', source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '@_@ 今天好累' } }],
     }
 
     await handler(makeEvent(body))
@@ -190,7 +190,7 @@ describe('Lambda handler', () => {
     const body = {
       events: [
         { type: 'activated', chatControl: {} },
-        { type: 'message', replyToken: 'tok', source: { userId: 'u1' }, message: { type: 'text', text: '你好' } },
+        { type: 'message', replyToken: 'tok', source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } },
       ],
     }
 
@@ -200,11 +200,22 @@ describe('Lambda handler', () => {
     expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok', '你好')
   })
 
+  it('stays out of group chats, where every member would share one memory', async () => {
+    const body = {
+      events: [{ type: 'message', replyToken: 'tok', source: { type: 'group', groupId: 'g1' }, message: { type: 'text', text: '欸大家' } }],
+    }
+
+    await handler(makeEvent(body))
+
+    expect(mockHandleText).not.toHaveBeenCalled()
+    expect(mockReplyMessage).not.toHaveBeenCalled()
+  })
+
   it('logs failures as "Handler error", the text the CloudWatch alarm counts', async () => {
     const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
     mockHandleText.mockRejectedValue(new Error('Anthropic chat failed: 529'))
     const body = {
-      events: [{ type: 'message', replyToken: 'tok', source: { userId: 'u1' }, message: { type: 'text', text: '你好' } }],
+      events: [{ type: 'message', replyToken: 'tok', source: { type: 'user', userId: 'u1' }, message: { type: 'text', text: '你好' } }],
     }
 
     await handler(makeEvent(body))
@@ -219,7 +230,7 @@ describe('Lambda handler', () => {
         {
           type: 'postback',
           replyToken: 'tok',
-          source: { userId: 'u1' },
+          source: { type: 'user', userId: 'u1' },
           postback: { data: 'action=casual_chat' },
         },
       ],
@@ -235,7 +246,7 @@ describe('Lambda handler', () => {
       {
         type: 'message',
         replyToken: 'tok',
-        source: { userId: 'u1' },
+        source: { type: 'user', userId: 'u1' },
         message: { type: 'text', text: '你好' },
       },
     ],

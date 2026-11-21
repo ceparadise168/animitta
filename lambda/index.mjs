@@ -45,11 +45,13 @@ export async function handler(event) {
 }
 
 async function handleEvent(lineEvent) {
+  // 無相界 talks one to one. Group and room events would all share one memory,
+  // and channel events (activation, for one) carry no source at all.
+  if (lineEvent.source?.type !== 'user') return
+  const userId = lineEvent.source.userId
   const replyToken = lineEvent.replyToken
 
   try {
-    // Some event types (channel activation, for one) carry no source.
-    const userId = lineEvent.source?.userId
     if (lineEvent.type === 'follow') {
       // User added bot or unblocked — send welcome + re-link Rich Menu
       await replyMessage(replyToken, WELCOME_MESSAGE)
