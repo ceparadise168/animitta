@@ -21,9 +21,9 @@ const client = new DynamoDBClient({ region: process.env.AWS_REGION || 'ap-northe
 
 const nowSeconds = Math.floor(Date.now() / 1000)
 const hashed = (pk) => createHash('sha256').update(pk).digest('hex').slice(0, 8)
-// Skip a summary that a new message rewrote (with an expiry) after the scan.
-const stillWithoutExpiry = {
-  ConditionExpression: 'attribute_not_exists(#ttl)',
+// Skip a summary that was rewritten after the scan, by either code version.
+const unchangedSinceScan = {
+  ConditionExpression: 'attribute_not_exists(#ttl) AND updatedAt = :scanned',
   ExpressionAttributeNames: { '#ttl': 'ttl' },
 }
 
@@ -58,20 +58,22 @@ for (const item of summaries) {
   if (!apply) continue
   try {
     if (action === 'delete') {
-      await client.send(new DeleteItemCommand({ TableName: TABLE, Key: key, ...stillWithoutExpiry }))
+      await client.send(
+        new DeleteItemCommand({ TableName: TABLE, Key: key, ...unchangedSinceScan, ExpressionAttributeValues: { ':scanned': item.updatedAt } })
+      )
     } else {
       await client.send(
         new UpdateItemCommand({
           TableName: TABLE,
           Key: key,
           UpdateExpression: 'SET #ttl = :ttl',
-          ExpressionAttributeValues: { ':ttl': { N: String(expiresAt) } },
-          ...stillWithoutExpiry,
+          ...unchangedSinceScan,
+          ExpressionAttributeValues: { ':ttl': { N: String(expiresAt) }, ':scanned': item.updatedAt },
         })
       )
     }
   } catch (err) {
     if (err.name !== 'ConditionalCheckFailedException') throw err
-    console.log(`    skipped: rewritten with an expiry since the scan`)
+    console.log(`    skipped: rewritten since the scan`)
   }
 }

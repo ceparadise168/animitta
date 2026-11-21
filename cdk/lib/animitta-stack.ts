@@ -97,7 +97,7 @@ export class AnimittaStack extends cdk.Stack {
     new cloudwatch.Alarm(this, 'HandlerFailureAlarm', {
       alarmName: 'animitta-handler-failures',
       alarmDescription:
-        '無相界有訊息沒回成功（AI 呼叫失敗、逾時或程式錯誤）。到 CloudWatch Logs /aws/lambda/animitta 搜尋 "Handler error" 或 "Task timed out" 看原因。',
+        '無相界有訊息沒處理完：可能沒回成功，也可能回了但記憶沒存好（AI 呼叫失敗、逾時或程式錯誤）。到 CloudWatch Logs /aws/lambda/animitta 搜尋 "Handler error" 或 "Task timed out" 看原因。',
       metric: failures,
       threshold: 1,
       evaluationPeriods: 1,
