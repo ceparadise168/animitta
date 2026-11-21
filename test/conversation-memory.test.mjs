@@ -8,6 +8,7 @@ process.env.MEMORY_TABLE_NAME = 'test-table'
 process.env.MAX_RECENT_TURNS = '5'
 process.env.SESSION_IDLE_HOURS = '2'
 process.env.CONVERSATION_TTL_DAYS = '30'
+process.env.SUMMARY_TTL_DAYS = '90'
 process.env.LLM_PROVIDER = 'anthropic'
 process.env.ANTHROPIC_API_KEY = 'test-key'
 
@@ -28,6 +29,16 @@ jest.unstable_mockModule('@aws-sdk/client-dynamodb', () => {
       return {}
     }
     if (type === 'Get') return { Item: rows.get(rowKey(input.Key)) }
+    if (type === 'Update') {
+      const row = rows.get(rowKey(input.Key))
+      const now = Number(input.ExpressionAttributeValues[':now']?.N)
+      const expired = row?.ttl && Number(row.ttl.N) <= now
+      if (!row || (input.ConditionExpression.includes('#ttl > :now') && expired)) {
+        throw Object.assign(new Error('The conditional request failed'), { name: 'ConditionalCheckFailedException' })
+      }
+      row.ttl = input.ExpressionAttributeValues[':ttl']
+      return {}
+    }
     if (type === 'Query') {
       const values = input.ExpressionAttributeValues
       const prefix = values[':prefix']?.S ?? ''
@@ -55,6 +66,7 @@ jest.unstable_mockModule('@aws-sdk/client-dynamodb', () => {
     QueryCommand: command('Query'),
     GetItemCommand: command('Get'),
     PutItemCommand: command('Put'),
+    UpdateItemCommand: command('Update'),
     BatchWriteItemCommand: command('BatchWrite'),
   }
 })
@@ -89,13 +101,21 @@ function send(event) {
 }
 const sendText = (text) => send({ type: 'message', message: { type: 'text', text } })
 
-function putTurn(minutesAgo, userText, botText) {
+const DAY = 86400
+const secondsFromNow = (s) => ({ N: String(Math.floor(Date.now() / 1000) + s) })
+
+function putTurn(minutesAgo, userText, botText, ttl) {
   const iso = new Date(Date.now() - minutesAgo * 60_000).toISOString()
   for (const [role, suffix, content] of [['user', 'user', userText], ['assistant', 'asst', botText]]) {
     const sk = `TURN#${iso}#${suffix}`
-    rows.set(`${PK}|${sk}`, { pk: { S: PK }, sk: { S: sk }, role: { S: role }, content: { S: content } })
+    rows.set(`${PK}|${sk}`, { pk: { S: PK }, sk: { S: sk }, role: { S: role }, content: { S: content }, ...(ttl && { ttl }) })
   }
 }
+
+function putSummary(content, ttl) {
+  rows.set(`${PK}|SUMMARY`, { pk: { S: PK }, sk: { S: 'SUMMARY' }, content: { S: content }, updatedAt: { S: '2026-07-25T06:01:44.532Z' }, ...(ttl && { ttl }) })
+}
+const summaryRow = () => rows.get(`${PK}|SUMMARY`)
 
 const everythingSent = (request) => [request.system, ...request.messages.map((m) => m.content)].join('\n')
 
@@ -174,6 +194,46 @@ describe('conversation memory, end to end', () => {
 
     expect(chatRequests[0].messages.at(-1)).toEqual({ role: 'user', content: '（傳了一張貼圖：cry、sad）' })
     expect(lineReplies).toEqual(['（模型的回覆）'])
+  })
+
+
+  it('forgets an expired summary even before DynamoDB has removed it', async () => {
+    putSummary('使用者提過他在準備轉職', secondsFromNow(-60))
+
+    await sendText('嗨')
+
+    expect(chatRequests[0].system).not.toContain('轉職')
+  })
+
+  it('does not bring an expired summary back to life when the user writes again', async () => {
+    putSummary('使用者提過他在準備轉職', secondsFromNow(-60))
+
+    await sendText('嗨')
+
+    expect(Number(summaryRow().ttl.N)).toBeLessThan(Math.floor(Date.now() / 1000))
+  })
+
+  it('keeps the summary for SUMMARY_TTL_DAYS after the last message, not after it was written', async () => {
+    putSummary('使用者提過他在準備轉職', secondsFromNow(3 * DAY))
+
+    await sendText('最近還是很猶豫')
+
+    expect(chatRequests[0].system).toContain('轉職')
+    expect(Number(summaryRow().ttl.N)).toBeGreaterThanOrEqual(Number(secondsFromNow(90 * DAY).N) - 5)
+  })
+
+  it('never folds expired turns into a new summary', async () => {
+    putTurn(31 * 24 * 60, '我在考慮離婚', '嗯，這個很重', secondsFromNow(-DAY))
+    putTurn(185, '今天天氣好好', '真的，適合出去走走')
+
+    await sendText('我出門散步了')
+    await sendText('走了一小時')
+
+    const sent = everythingSent(chatRequests[0]) + everythingSent(chatRequests[1])
+    expect(sent).toContain('今天天氣好好')
+    expect(sent).not.toContain('離婚')
+    expect(summaryRow().content.S).not.toContain('離婚')
+    expect(Number(summaryRow().ttl.N)).toBeGreaterThanOrEqual(Number(secondsFromNow(90 * DAY).N) - 5)
   })
 
 })

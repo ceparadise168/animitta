@@ -1,5 +1,5 @@
 import { replyMessage, replyWithQuickReply } from './line.mjs'
-import { clearMemory } from './services/memory.mjs'
+import { clearMemory, RETENTION_DAYS } from './services/memory.mjs'
 import { replyAndRemember } from './services/chat.mjs'
 
 const CASUAL_CHAT_STARTERS = [
@@ -10,9 +10,13 @@ const CASUAL_CHAT_STARTERS = [
   '隨意聊聊就從一句話開始\n\n最近讓你卡住的，是一件事、一個人，還是一個一直冒出來的念頭',
 ]
 
+const AI_SERVICE = { anthropic: 'Anthropic 的 Claude', openai: 'OpenAI 的 GPT' }[process.env.LLM_PROVIDER || 'openai']
+
 const ABOUT_MESSAGE =
   '無相界是一個帶著金剛經視角的自在聊天空間。你可以抒發煩惱、問生活裡卡住的事，也可以單純想理解《金剛經》在說什麼。\n\n' +
   '它不是籤詩機，也不是佛學講堂。金剛經在這裡比較像底色：需要時拿來照一下，不需要時就好好聊天。\n\n' +
+  `它會記得你最近跟它聊過的，下次才接得上。最近幾輪的原話最多留 ${RETENTION_DAYS.turns} 天，更早的會整理成一段重點；${RETENTION_DAYS.summary} 天沒來聊天，就全部自動刪掉。想馬上清空的話，按選單的「清除記憶」就好。\n\n` +
+  `你傳的文字會交給 AI 服務（${AI_SERVICE}）來產生回覆。\n\n` +
   '目前由我個人自費維護。如果你覺得有幫助，歡迎分享給朋友；若想將這份善意延續下去，也歡迎隨喜捐款給你支持的慈善團體。\n\n' +
   '有任何建議，都歡迎寫信給我：erictu.engineer@gmail.com'
 

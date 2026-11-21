@@ -10,6 +10,7 @@ jest.unstable_mockModule('@aws-sdk/client-dynamodb', () => ({
   QueryCommand: jest.fn((params) => ({ ...params, _type: 'Query' })),
   GetItemCommand: jest.fn((params) => ({ ...params, _type: 'GetItem' })),
   PutItemCommand: jest.fn((params) => ({ ...params, _type: 'PutItem' })),
+  UpdateItemCommand: jest.fn((params) => ({ ...params, _type: 'UpdateItem' })),
   DeleteItemCommand: jest.fn((params) => ({ ...params, _type: 'DeleteItem' })),
   BatchWriteItemCommand: jest.fn((params) => ({
     ...params,
@@ -67,12 +68,27 @@ describe('memory service', () => {
   })
 
   describe('saveTurn', () => {
-    it('writes two items (user + assistant) to DynamoDB', async () => {
+    it('writes the user and bot items, each expiring CONVERSATION_TTL_DAYS from now', async () => {
       mockSend.mockResolvedValue({})
 
       await saveTurn('user123', '你好', '嗨～')
 
-      expect(mockSend).toHaveBeenCalledTimes(2)
+      const puts = mockSend.mock.calls.map(([cmd]) => cmd).filter((cmd) => cmd._type === 'PutItem')
+      expect(puts.map((cmd) => [cmd.Item.role.S, cmd.Item.content.S])).toEqual([
+        ['user', '你好'],
+        ['assistant', '嗨～'],
+      ])
+      const in30Days = Math.floor(Date.now() / 1000) + 30 * 86400
+      for (const cmd of puts) expect(Number(cmd.Item.ttl.N)).toBeGreaterThanOrEqual(in30Days - 5)
+    })
+
+    it('still saves the turn when the user has no summary yet', async () => {
+      mockSend.mockImplementation(async (cmd) => {
+        if (cmd._type === 'UpdateItem') throw Object.assign(new Error('The conditional request failed'), { name: 'ConditionalCheckFailedException' })
+        return {}
+      })
+
+      await expect(saveTurn('user123', '你好', '嗨～')).resolves.toBeUndefined()
     })
   })
 })

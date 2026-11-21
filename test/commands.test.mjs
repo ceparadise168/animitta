@@ -7,9 +7,12 @@ jest.unstable_mockModule('../lambda/line.mjs', () => ({
   replyWithQuickReply: mockReplyWithQuickReply,
 }))
 
+process.env.LLM_PROVIDER = 'anthropic'
+
 const mockClearMemory = jest.fn()
 jest.unstable_mockModule('../lambda/services/memory.mjs', () => ({
   clearMemory: mockClearMemory,
+  RETENTION_DAYS: { turns: 7, summary: 45 },
 }))
 
 const mockReplyAndRemember = jest.fn()
@@ -53,4 +56,15 @@ describe('commands', () => {
     expect(text).toContain('金剛經')
     expect(text).not.toContain('分享一句經文')
   })
+
+  it('tells users how long their words are kept, from the same numbers the memory uses', async () => {
+    await handleCommand('user1', 'token1', '@關於')
+
+    const text = mockReplyMessage.mock.calls[0][1]
+    expect(text).toContain('最多留 7 天')
+    expect(text).toContain('45 天沒來聊天，就全部自動刪掉')
+    expect(text).toContain('「清除記憶」')
+    expect(text).toContain('Anthropic 的 Claude')
+  })
+
 })
