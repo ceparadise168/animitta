@@ -12,6 +12,8 @@ const WELCOME_MESSAGE =
   '📖 關於 — 這個專案是什麼、為什麼存在\n\n' +
   '想聊什麼，隨時開口就好 😊'
 
+const FALLBACK_REPLY = '我這邊暫時卡住了，沒辦法好好回你。過一下再傳一次給我好嗎'
+
 export async function handler(event) {
   const body = event.isBase64Encoded
     ? Buffer.from(event.body, 'base64').toString('utf-8')
@@ -55,6 +57,8 @@ export async function handler(event) {
     }
   } catch (err) {
     console.error('Handler error:', err)
+    // Fails harmlessly when the reply token was already used before the error.
+    await replyMessage(replyToken, FALLBACK_REPLY).catch(() => {})
   }
 
   return { statusCode: 200, body: 'OK' }

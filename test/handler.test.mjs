@@ -136,4 +136,35 @@ describe('Lambda handler', () => {
 
     expect(mockHandlePostback).toHaveBeenCalledWith('u1', 'tok', 'feedback:good')
   })
+
+  const textEvent = {
+    events: [
+      {
+        type: 'message',
+        replyToken: 'tok',
+        source: { userId: 'u1' },
+        message: { type: 'text', text: '你好' },
+      },
+    ],
+  }
+
+  it('sends a fallback reply when the LLM call fails', async () => {
+    mockHandleText.mockRejectedValue(new Error('Anthropic chat failed: 401'))
+    mockReplyMessage.mockResolvedValue(undefined)
+
+    const result = await handler(makeEvent(textEvent))
+
+    expect(result.statusCode).toBe(200)
+    expect(mockReplyMessage).toHaveBeenCalledTimes(1)
+    expect(mockReplyMessage).toHaveBeenCalledWith('tok', expect.stringContaining('暫時'))
+  })
+
+  it('still returns 200 when the fallback reply is rejected', async () => {
+    mockHandleText.mockRejectedValue(new Error('DynamoDB save failed'))
+    mockReplyMessage.mockRejectedValue(new Error('LINE reply failed: 400'))
+
+    const result = await handler(makeEvent(textEvent))
+
+    expect(result.statusCode).toBe(200)
+  })
 })

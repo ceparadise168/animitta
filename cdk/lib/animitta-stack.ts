@@ -1,8 +1,17 @@
 import * as cdk from 'aws-cdk-lib'
 import * as lambda from 'aws-cdk-lib/aws-lambda'
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb'
+import * as sns from 'aws-cdk-lib/aws-sns'
+import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions'
+import * as logs from 'aws-cdk-lib/aws-logs'
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch'
+import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions'
+import * as scheduler from 'aws-cdk-lib/aws-scheduler'
+import * as schedulerTargets from 'aws-cdk-lib/aws-scheduler-targets'
 import * as path from 'path'
 import { Construct } from 'constructs'
+
+const KEY_REMINDER_DAYS_BEFORE = [7, 1]
 
 export class AnimittaStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -53,5 +62,75 @@ export class AnimittaStack extends cdk.Stack {
       value: fnUrl.url,
       description: 'LINE Webhook URL — paste this into LINE Developers Console',
     })
+
+    const alertEmail = process.env.ALERT_EMAIL
+    if (!alertEmail) throw new Error('ALERT_EMAIL is required in .env')
+    const alertTopic = new sns.Topic(this, 'AlertTopic', { displayName: '無相界' })
+    alertTopic.addSubscription(new subscriptions.EmailSubscription(alertEmail))
+
+    this.addFailureAlarm(fn, alertTopic)
+    this.addKeyExpiryReminders(alertTopic, process.env.ANTHROPIC_KEY_EXPIRES_ON)
+  }
+
+  // index.mjs catches errors and returns 200, so Lambda's own Errors metric
+  // only sees timeouts and crashes. Caught failures are counted from the log line.
+  private addFailureAlarm(fn: lambda.Function, topic: sns.ITopic) {
+    const caughtFailures = new logs.MetricFilter(this, 'HandlerErrorFilter', {
+      logGroup: logs.LogGroup.fromLogGroupName(this, 'HandlerLogs', `/aws/lambda/${fn.functionName}`),
+      filterPattern: logs.FilterPattern.anyTerm('Handler error'),
+      metricNamespace: 'Animitta',
+      metricName: 'HandlerErrors',
+      metricValue: '1',
+    }).metric({ statistic: 'Sum', period: cdk.Duration.minutes(5) })
+
+    const failures = new cloudwatch.MathExpression({
+      expression: 'FILL(caught, 0) + FILL(uncaught, 0)',
+      usingMetrics: {
+        caught: caughtFailures,
+        uncaught: fn.metricErrors({ statistic: 'Sum', period: cdk.Duration.minutes(5) }),
+      },
+      label: 'Failed LINE events',
+      period: cdk.Duration.minutes(5),
+    })
+
+    new cloudwatch.Alarm(this, 'HandlerFailureAlarm', {
+      alarmName: 'animitta-handler-failures',
+      alarmDescription:
+        '無相界有訊息沒回成功（AI 呼叫失敗、逾時或程式錯誤）。到 CloudWatch Logs /aws/lambda/animitta 搜尋 "Handler error" 或 "Task timed out" 看原因。',
+      metric: failures,
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(new cloudwatchActions.SnsAction(topic))
+  }
+
+  private addKeyExpiryReminders(topic: sns.ITopic, expiresOn: string | undefined) {
+    if (!expiresOn) return
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expiresOn)) {
+      throw new Error(`ANTHROPIC_KEY_EXPIRES_ON must be YYYY-MM-DD, got "${expiresOn}"`)
+    }
+    const expiryDay = new Date(`${expiresOn}T00:00:00Z`)
+
+    for (const daysBefore of KEY_REMINDER_DAYS_BEFORE) {
+      // 02:00 UTC is 10:00 in Taipei; ScheduleExpression.at formats the date in UTC.
+      const remindAt = new Date(expiryDay.getTime() - daysBefore * 86_400_000 + 2 * 3_600_000)
+      if (remindAt.getTime() <= Date.now()) continue
+
+      new scheduler.Schedule(this, `KeyExpiryReminder${daysBefore}d`, {
+        description: `Anthropic API key expires ${expiresOn}; reminder ${daysBefore} day(s) before`,
+        schedule: scheduler.ScheduleExpression.at(remindAt),
+        target: new schedulerTargets.SnsPublish(topic, {
+          input: scheduler.ScheduleTargetInput.fromText(
+            `無相界的 Anthropic API key 會在 ${expiresOn} 到期，剩 ${daysBefore} 天。到期後 bot 就沒辦法回覆打字訊息。\n\n` +
+              '換 key 的步驟：\n' +
+              '1. 到 Anthropic Console 產生新的 key\n' +
+              '2. 在 ~/workspace/vibe-coding/animitta/.env 更新 ANTHROPIC_API_KEY 和 ANTHROPIC_KEY_EXPIRES_ON\n' +
+              '3. 在同一個資料夾執行 npx cdk deploy\n\n' +
+              '要改 .env 再部署,不要只改 Lambda Console，不然下次部署會把舊的 key 蓋回去。',
+          ),
+        }),
+      })
+    }
   }
 }
