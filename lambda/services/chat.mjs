@@ -10,7 +10,7 @@ function stripMarkdown(text) {
 export async function handleText(userId, replyToken, userText) {
   const provider = getProvider()
 
-  showLoadingIndicator(userId).catch(() => {})
+  showLoadingIndicator(userId).catch((err) => console.warn(err.message))
 
   const { summary, recentTurns, isStaleSession } = await getContext(userId)
 

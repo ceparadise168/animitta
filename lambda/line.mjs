@@ -21,7 +21,7 @@ export async function linkRichMenu(userId, richMenuId) {
 }
 
 export async function showLoadingIndicator(userId) {
-  await fetch('https://api.line.me/v2/bot/chat/loading', {
+  const res = await fetch('https://api.line.me/v2/bot/chat/loading/start', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -29,6 +29,7 @@ export async function showLoadingIndicator(userId) {
     },
     body: JSON.stringify({ chatId: userId }),
   })
+  if (!res.ok) throw new Error(`LINE loading indicator failed: ${res.status}`)
 }
 
 export async function replyMessage(replyToken, text) {
