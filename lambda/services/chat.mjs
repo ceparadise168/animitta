@@ -28,9 +28,10 @@ export async function replyAndRemember(userId, replyToken, userSide, reply) {
 }
 
 // Every exchange the bot takes part in is written here, so a new way of
-// talking to the bot cannot skip the session bookkeeping.
+// talking to the bot cannot skip the session bookkeeping. The exchange is saved
+// before any summarizing, so a failed summary never loses what was just said.
 async function remember(userId, { previousSession }, userText, reply, provider) {
-  if (previousSession) await archiveSession(userId, provider)
   await saveTurn(userId, userText, reply)
+  if (previousSession) await archiveSession(userId, previousSession, provider)
   await compressOldTurns(userId, provider)
 }

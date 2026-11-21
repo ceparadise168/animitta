@@ -11,6 +11,7 @@ jest.unstable_mockModule('@aws-sdk/client-dynamodb', () => ({
   GetItemCommand: jest.fn((params) => ({ ...params, _type: 'GetItem' })),
   PutItemCommand: jest.fn((params) => ({ ...params, _type: 'PutItem' })),
   UpdateItemCommand: jest.fn((params) => ({ ...params, _type: 'UpdateItem' })),
+  TransactWriteItemsCommand: jest.fn((params) => ({ ...params, _type: 'TransactWrite' })),
   DeleteItemCommand: jest.fn((params) => ({ ...params, _type: 'DeleteItem' })),
   BatchWriteItemCommand: jest.fn((params) => ({
     ...params,

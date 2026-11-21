@@ -1,7 +1,9 @@
 // Drives the real handler, chat service, memory and prompt against an in-memory
-// DynamoDB table, and checks what the model is actually sent.
+// DynamoDB that evaluates conditions and transactions, and checks what the
+// model is actually sent and what stays in the table.
 import { describe, it, expect, jest, beforeEach } from '@jest/globals'
 import { createHmac } from 'node:crypto'
+import { createFakeDynamoDb } from './support/fake-dynamodb.mjs'
 
 process.env.LINE_CHANNEL_SECRET = 'test-secret'
 process.env.MEMORY_TABLE_NAME = 'test-table'
@@ -12,71 +14,24 @@ process.env.SUMMARY_TTL_DAYS = '90'
 process.env.LLM_PROVIDER = 'anthropic'
 process.env.ANTHROPIC_API_KEY = 'test-key'
 
-const rows = new Map()
-const rowKey = (key) => `${key.pk.S}|${key.sk.S}`
-
-jest.unstable_mockModule('@aws-sdk/client-dynamodb', () => {
-  const command = (type) =>
-    class {
-      constructor(input) {
-        this.type = type
-        this.input = input
-      }
-    }
-  const send = async ({ type, input }) => {
-    if (type === 'Put') {
-      rows.set(rowKey(input.Item), input.Item)
-      return {}
-    }
-    if (type === 'Get') return { Item: rows.get(rowKey(input.Key)) }
-    if (type === 'Update') {
-      const row = rows.get(rowKey(input.Key))
-      const now = Number(input.ExpressionAttributeValues[':now']?.N)
-      const expired = row?.ttl && Number(row.ttl.N) <= now
-      if (!row || (input.ConditionExpression.includes('#ttl > :now') && expired)) {
-        throw Object.assign(new Error('The conditional request failed'), { name: 'ConditionalCheckFailedException' })
-      }
-      row.ttl = input.ExpressionAttributeValues[':ttl']
-      return {}
-    }
-    if (type === 'Query') {
-      const values = input.ExpressionAttributeValues
-      const prefix = values[':prefix']?.S ?? ''
-      let items = [...rows.values()]
-        .filter((r) => r.pk.S === values[':pk'].S && r.sk.S.startsWith(prefix))
-        .sort((a, b) => (a.sk.S < b.sk.S ? -1 : 1))
-      if (input.ScanIndexForward === false) items.reverse()
-      if (input.Limit) items = items.slice(0, input.Limit)
-      return { Items: items }
-    }
-    if (type === 'BatchWrite') {
-      for (const request of Object.values(input.RequestItems)[0]) {
-        rows.delete(rowKey(request.DeleteRequest.Key))
-      }
-      return {}
-    }
-    throw new Error(`fake DynamoDB does not handle ${type}`)
-  }
-  return {
-    DynamoDBClient: class {
-      send(cmd) {
-        return send(cmd)
-      }
-    },
-    QueryCommand: command('Query'),
-    GetItemCommand: command('Get'),
-    PutItemCommand: command('Put'),
-    UpdateItemCommand: command('Update'),
-    BatchWriteItemCommand: command('BatchWrite'),
-  }
-})
+const fake = createFakeDynamoDb()
+jest.unstable_mockModule('@aws-sdk/client-dynamodb', () => fake.module)
+const { rows, hooks } = fake
 
 const chatRequests = []
 const lineReplies = []
+// LINE accepts each reply token once; a second reply with it fails.
+const usedReplyTokens = new Set()
+// Like the real summarizer, the result carries the old summary forward.
+const echoSummary = async (old, folded) => `${old ? `${old}｜` : ''}摘要：${folded}`
+const llm = { summarize: echoSummary }
 global.fetch = async (url, init) => {
   const ok = (body) => ({ ok: true, status: 200, json: async () => body })
   if (String(url).endsWith('/v2/bot/message/reply')) {
-    lineReplies.push(JSON.parse(init.body).messages[0].text)
+    const { replyToken, messages } = JSON.parse(init.body)
+    if (usedReplyTokens.has(replyToken)) return { ok: false, status: 400, json: async () => ({ message: 'Invalid reply token' }) }
+    usedReplyTokens.add(replyToken)
+    lineReplies.push(messages[0].text)
     return ok({})
   }
   if (String(url).startsWith('https://api.line.me/')) return ok({})
@@ -85,24 +40,31 @@ global.fetch = async (url, init) => {
     chatRequests.push(body)
     return ok({ stop_reason: 'end_turn', content: [{ type: 'text', text: '（模型的回覆）' }] })
   }
-  const folded = body.messages[0].content.split('需要壓縮的對話：\n')[1]
-  return ok({ content: [{ type: 'text', text: `摘要：${folded}` }] })
+  const prompt = body.messages[0].content
+  const old = prompt.match(/舊摘要：\n([\s\S]*?)\n\n需要壓縮的對話/)?.[1] ?? null
+  try {
+    return ok({ content: [{ type: 'text', text: await llm.summarize(old, prompt.split('需要壓縮的對話：\n')[1]) }] })
+  } catch {
+    return { ok: false, status: 529, json: async () => ({}) }
+  }
 }
 
 const { handler } = await import('../lambda/index.mjs')
 
 const USER = 'U-memory'
 const PK = `USER#${USER}`
+const DAY = 86400
+const nowSeconds = () => Math.floor(Date.now() / 1000)
+const secondsFromNow = (s) => ({ N: String(nowSeconds() + s) })
 
+let replyTokens = 0
 function send(event) {
-  const body = JSON.stringify({ events: [{ replyToken: 'rt', source: { userId: USER }, ...event }] })
+  const body = JSON.stringify({ events: [{ replyToken: `rt-${++replyTokens}`, source: { userId: USER }, ...event }] })
   const signature = createHmac('SHA256', 'test-secret').update(body).digest('base64')
   return handler({ body, headers: { 'x-line-signature': signature } })
 }
 const sendText = (text) => send({ type: 'message', message: { type: 'text', text } })
-
-const DAY = 86400
-const secondsFromNow = (s) => ({ N: String(Math.floor(Date.now() / 1000) + s) })
+const confirmClear = () => send({ type: 'postback', postback: { data: 'confirm:clear' } })
 
 function putTurn(minutesAgo, userText, botText, ttl) {
   const iso = new Date(Date.now() - minutesAgo * 60_000).toISOString()
@@ -111,129 +73,226 @@ function putTurn(minutesAgo, userText, botText, ttl) {
     rows.set(`${PK}|${sk}`, { pk: { S: PK }, sk: { S: sk }, role: { S: role }, content: { S: content }, ...(ttl && { ttl }) })
   }
 }
-
 function putSummary(content, ttl) {
-  rows.set(`${PK}|SUMMARY`, { pk: { S: PK }, sk: { S: 'SUMMARY' }, content: { S: content }, updatedAt: { S: '2026-07-25T06:01:44.532Z' }, ...(ttl && { ttl }) })
+  rows.set(`${PK}|SUMMARY`, {
+    pk: { S: PK },
+    sk: { S: 'SUMMARY' },
+    content: { S: content },
+    updatedAt: { S: '2026-07-25T06:01:44.532Z' },
+    ...(ttl && { ttl }),
+  })
 }
 const summaryRow = () => rows.get(`${PK}|SUMMARY`)
-
+const turnRows = () => [...rows.values()].filter((r) => r.sk.S.startsWith('TURN#'))
 const everythingSent = (request) => [request.system, ...request.messages.map((m) => m.content)].join('\n')
+const expectExpiryInDays = (ttl, days) => expect(Math.abs(Number(ttl.N) - (nowSeconds() + days * DAY))).toBeLessThan(60)
 
 describe('conversation memory, end to end', () => {
   beforeEach(() => {
     rows.clear()
     chatRequests.length = 0
     lineReplies.length = 0
+    llm.summarize = echoSummary
+    hooks.beforeTransaction = async () => {}
   })
 
-  it('picks up the previous conversation on the first message after a long gap', async () => {
-    putTurn(185, '我媽昨天住院了，我整晚睡不著', '嗯，這個很重')
-    putTurn(180, '醫生說要觀察三天', '那這三天你先顧好自己')
+  describe('sessions', () => {
+    it('picks up the previous conversation on the first message after a long gap', async () => {
+      putTurn(185, '我媽昨天住院了，我整晚睡不著', '嗯，這個很重')
+      putTurn(180, '醫生說要觀察三天', '那這三天你先顧好自己')
 
-    await sendText('她今天出院了')
+      await sendText('她今天出院了')
 
-    const sent = everythingSent(chatRequests[0])
-    expect(sent).toContain('我媽昨天住院了')
-    expect(sent).toContain('醫生說要觀察三天')
-    expect(chatRequests[0].messages.at(-1)).toEqual({ role: 'user', content: '她今天出院了' })
+      const sent = everythingSent(chatRequests[0])
+      expect(sent).toContain('我媽昨天住院了')
+      expect(sent).toContain('醫生說要觀察三天')
+      expect(chatRequests[0].messages.at(-1)).toEqual({ role: 'user', content: '她今天出院了' })
+    })
+
+    it('treats the earlier conversation as background, not as live turns, after a long gap', async () => {
+      putTurn(185, '我媽昨天住院了', '嗯，這個很重')
+
+      await sendText('她今天出院了')
+
+      expect(chatRequests[0].messages).toEqual([{ role: 'user', content: '她今天出院了' }])
+      expect(chatRequests[0].system).toContain('上一段對話')
+    })
+
+    it('keeps recent turns as live conversation within a session', async () => {
+      putTurn(10, '今天好累', '累爆喔')
+
+      await sendText('對啊')
+
+      expect(chatRequests[0].messages).toEqual([
+        { role: 'user', content: '今天好累' },
+        { role: 'assistant', content: '累爆喔' },
+        { role: 'user', content: '對啊' },
+      ])
+    })
+
+    it('measures the gap from the newest turn, not the oldest', async () => {
+      putTurn(300, '早上的事', '嗯')
+      putTurn(10, '剛剛的事', '嗯嗯')
+
+      await sendText('還有')
+
+      expect(chatRequests[0].system).not.toContain('上一段對話')
+      expect(everythingSent(chatRequests[0])).toContain('剛剛的事')
+    })
+
+    it('folds the previous conversation into the summary once the reply is out', async () => {
+      putTurn(185, '我媽昨天住院了', '嗯，這個很重')
+
+      await sendText('她今天出院了')
+      await sendText('所以我比較放心了')
+
+      expect(chatRequests[1].system).toContain('我媽昨天住院了')
+      expect(chatRequests[1].messages[0]).toEqual({ role: 'user', content: '她今天出院了' })
+    })
+
+    it('keeps up to MAX_RECENT_TURNS turns as they were said, and folds only the oldest beyond that', async () => {
+      for (let i = 0; i < 3; i++) putTurn(40 - i, `第${i}句`, `回${i}`)
+
+      await sendText('第3句')
+      expect(summaryRow()).toBeUndefined()
+      expect(turnRows()).toHaveLength(8)
+
+      await sendText('第4句')
+      expect(summaryRow()).toBeUndefined()
+      expect(turnRows()).toHaveLength(10)
+
+      await sendText('第5句')
+      expect(summaryRow().content.S).toContain('第0句')
+      expect(summaryRow().content.S).not.toContain('第1句')
+      expect(turnRows()).toHaveLength(10)
+    })
   })
 
-  it('treats the earlier conversation as background, not as live turns, after a long gap', async () => {
-    putTurn(185, '我媽昨天住院了', '嗯，這個很重')
+  describe('what the bot said without the model', () => {
+    it('remembers the casual-chat opener the user is answering', async () => {
+      await send({ type: 'postback', postback: { data: 'action=casual_chat' } })
+      const opener = lineReplies[0]
 
-    await sendText('她今天出院了')
+      await sendText('一個人')
 
-    expect(chatRequests[0].messages).toEqual([{ role: 'user', content: '她今天出院了' }])
-    expect(chatRequests[0].system).toContain('上一段對話')
+      expect(everythingSent(chatRequests[0])).toContain(opener)
+    })
+
+    it('remembers a photo it could not read, so the next message can refer to it', async () => {
+      await send({ type: 'message', message: { type: 'image', id: 'img1' } })
+      expect(lineReplies[0]).toContain('只能讀文字')
+
+      await sendText('你覺得那張怎樣')
+
+      const sent = everythingSent(chatRequests[0])
+      expect(sent).toContain('（傳了一張圖片）')
+      expect(sent).toContain('只能讀文字')
+    })
+
+    it('answers a sticker through the model', async () => {
+      await send({ type: 'message', message: { type: 'sticker', packageId: '446', stickerId: '1988', keywords: ['cry', 'sad'] } })
+
+      expect(chatRequests[0].messages.at(-1)).toEqual({ role: 'user', content: '（傳了一張貼圖：cry、sad）' })
+      expect(lineReplies).toEqual(['（模型的回覆）'])
+    })
   })
 
-  it('keeps recent turns as live conversation within a session', async () => {
-    putTurn(10, '今天好累', '累爆喔')
+  describe('retention', () => {
+    it('keeps each turn for CONVERSATION_TTL_DAYS after it was said', async () => {
+      await sendText('嗨')
 
-    await sendText('對啊')
+      for (const row of turnRows()) expectExpiryInDays(row.ttl, 30)
+    })
 
-    expect(chatRequests[0].messages).toEqual([
-      { role: 'user', content: '今天好累' },
-      { role: 'assistant', content: '累爆喔' },
-      { role: 'user', content: '對啊' },
-    ])
+    it('creates no summary for a new user, and their next message still works', async () => {
+      await sendText('第一次來')
+      expect(summaryRow()).toBeUndefined()
+
+      await sendText('第二句')
+      expect(lineReplies).toEqual(['（模型的回覆）', '（模型的回覆）'])
+    })
+
+    it('forgets an expired summary even before DynamoDB has removed it', async () => {
+      putSummary('使用者提過他在準備轉職', secondsFromNow(-60))
+
+      await sendText('嗨')
+
+      expect(chatRequests[0].system).not.toContain('轉職')
+    })
+
+    it('does not bring an expired summary back to life when the user writes again', async () => {
+      putSummary('使用者提過他在準備轉職', secondsFromNow(-60))
+
+      await sendText('嗨')
+
+      expect(Number(summaryRow().ttl.N)).toBeLessThan(nowSeconds())
+    })
+
+    it('keeps the summary for SUMMARY_TTL_DAYS after the last message, not after it was written', async () => {
+      putSummary('使用者提過他在準備轉職', secondsFromNow(3 * DAY))
+
+      await sendText('最近還是很猶豫')
+
+      expect(chatRequests[0].system).toContain('轉職')
+      expectExpiryInDays(summaryRow().ttl, 90)
+    })
+
+    it('never folds expired turns into a new summary', async () => {
+      putTurn(31 * 24 * 60, '我在考慮離婚', '嗯，這個很重', secondsFromNow(-DAY))
+      putTurn(185, '今天天氣好好', '真的，適合出去走走')
+
+      await sendText('我出門散步了')
+      await sendText('走了一小時')
+
+      const sent = everythingSent(chatRequests[0]) + everythingSent(chatRequests[1])
+      expect(sent).toContain('今天天氣好好')
+      expect(sent).not.toContain('離婚')
+      expect(summaryRow().content.S).not.toContain('離婚')
+      expectExpiryInDays(summaryRow().ttl, 90)
+    })
+
+    it('does not copy an expired summary into a new one when folding', async () => {
+      putSummary('使用者提過他在準備轉職', secondsFromNow(-60))
+      putTurn(185, '今天天氣好好', '真的')
+
+      await sendText('我出門散步了')
+
+      expect(summaryRow().content.S).toContain('今天天氣好好')
+      expect(summaryRow().content.S).not.toContain('轉職')
+    })
   })
 
-  it('folds the previous conversation into the summary once the reply is out', async () => {
-    putTurn(185, '我媽昨天住院了', '嗯，這個很重')
+  describe('when things go wrong', () => {
+    it('keeps what was just said when summarizing fails after a gap', async () => {
+      const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+      llm.summarize = async () => {
+        throw new Error('overloaded')
+      }
+      putTurn(185, '我媽昨天住院了', '嗯，這個很重')
 
-    await sendText('她今天出院了')
-    await sendText('所以我比較放心了')
+      await sendText('她今天出院了')
+      await sendText('你還記得我剛剛說什麼嗎')
 
-    expect(chatRequests[1].system).toContain('我媽昨天住院了')
-    expect(chatRequests[1].messages[0]).toEqual({ role: 'user', content: '她今天出院了' })
+      expect(lineReplies).toEqual(['（模型的回覆）', '（模型的回覆）'])
+      expect(everythingSent(chatRequests[1])).toContain('她今天出院了')
+      expect(chatRequests[1].system).not.toContain('上一段對話')
+      expect(logged).toHaveBeenCalledWith('Handler error:', expect.any(Error))
+      logged.mockRestore()
+    })
+
+    it('does not bring memory back when 清除記憶 lands while a fold is being written', async () => {
+      putTurn(185, '我在考慮離婚', '嗯，這個很重')
+      hooks.beforeTransaction = async () => {
+        hooks.beforeTransaction = async () => {}
+        await confirmClear()
+      }
+
+      await sendText('今天又想了一整天')
+
+      expect(lineReplies).toContain('好的，記憶已清空 ✨ 我們從這裡重新開始')
+      expect([...rows.values()]).toEqual([])
+      await sendText('嗨')
+      expect(everythingSent(chatRequests[1])).not.toContain('離婚')
+    })
   })
-
-  it('remembers the casual-chat opener the user is answering', async () => {
-    await send({ type: 'postback', postback: { data: 'action=casual_chat' } })
-    const opener = lineReplies[0]
-
-    await sendText('一個人')
-
-    expect(everythingSent(chatRequests[0])).toContain(opener)
-  })
-
-  it('remembers a photo it could not read, so the next message can refer to it', async () => {
-    await send({ type: 'message', message: { type: 'image', id: 'img1' } })
-    expect(lineReplies[0]).toContain('只能讀文字')
-
-    await sendText('你覺得那張怎樣')
-
-    const sent = everythingSent(chatRequests[0])
-    expect(sent).toContain('（傳了一張圖片）')
-    expect(sent).toContain('只能讀文字')
-  })
-
-  it('answers a sticker through the model', async () => {
-    await send({ type: 'message', message: { type: 'sticker', packageId: '446', stickerId: '1988', keywords: ['cry', 'sad'] } })
-
-    expect(chatRequests[0].messages.at(-1)).toEqual({ role: 'user', content: '（傳了一張貼圖：cry、sad）' })
-    expect(lineReplies).toEqual(['（模型的回覆）'])
-  })
-
-
-  it('forgets an expired summary even before DynamoDB has removed it', async () => {
-    putSummary('使用者提過他在準備轉職', secondsFromNow(-60))
-
-    await sendText('嗨')
-
-    expect(chatRequests[0].system).not.toContain('轉職')
-  })
-
-  it('does not bring an expired summary back to life when the user writes again', async () => {
-    putSummary('使用者提過他在準備轉職', secondsFromNow(-60))
-
-    await sendText('嗨')
-
-    expect(Number(summaryRow().ttl.N)).toBeLessThan(Math.floor(Date.now() / 1000))
-  })
-
-  it('keeps the summary for SUMMARY_TTL_DAYS after the last message, not after it was written', async () => {
-    putSummary('使用者提過他在準備轉職', secondsFromNow(3 * DAY))
-
-    await sendText('最近還是很猶豫')
-
-    expect(chatRequests[0].system).toContain('轉職')
-    expect(Number(summaryRow().ttl.N)).toBeGreaterThanOrEqual(Number(secondsFromNow(90 * DAY).N) - 5)
-  })
-
-  it('never folds expired turns into a new summary', async () => {
-    putTurn(31 * 24 * 60, '我在考慮離婚', '嗯，這個很重', secondsFromNow(-DAY))
-    putTurn(185, '今天天氣好好', '真的，適合出去走走')
-
-    await sendText('我出門散步了')
-    await sendText('走了一小時')
-
-    const sent = everythingSent(chatRequests[0]) + everythingSent(chatRequests[1])
-    expect(sent).toContain('今天天氣好好')
-    expect(sent).not.toContain('離婚')
-    expect(summaryRow().content.S).not.toContain('離婚')
-    expect(Number(summaryRow().ttl.N)).toBeGreaterThanOrEqual(Number(secondsFromNow(90 * DAY).N) - 5)
-  })
-
 })
