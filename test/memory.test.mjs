@@ -37,12 +37,17 @@ describe('memory service', () => {
       expect(ctx.recentTurns).toEqual([])
     })
 
-    it('returns recent turns and summary', async () => {
-      // ScanIndexForward:false returns newest first — mock reverse order
+    it('returns recent turns in conversation order, and the summary', async () => {
+      const recent = new Date(Date.now() - 60_000).toISOString()
+      const earlier = new Date(Date.now() - 120_000).toISOString()
+      // What DynamoDB returns for ScanIndexForward:false. The two items of a turn
+      // share a timestamp and "user" sorts after "asst", so user comes first.
       mockSend.mockResolvedValueOnce({
         Items: [
-          { sk: { S: 'TURN#2026-01-01T00:00:00Z#asst' }, content: { S: '嗨' }, role: { S: 'assistant' } },
-          { sk: { S: 'TURN#2026-01-01T00:00:00Z#user' }, content: { S: '你好' }, role: { S: 'user' } },
+          { sk: { S: `TURN#${recent}#user` }, content: { S: '還好' }, role: { S: 'user' } },
+          { sk: { S: `TURN#${recent}#asst` }, content: { S: '那就好' }, role: { S: 'assistant' } },
+          { sk: { S: `TURN#${earlier}#user` }, content: { S: '你好' }, role: { S: 'user' } },
+          { sk: { S: `TURN#${earlier}#asst` }, content: { S: '嗨' }, role: { S: 'assistant' } },
         ],
       })
       mockSend.mockResolvedValueOnce({
@@ -55,6 +60,8 @@ describe('memory service', () => {
       expect(ctx.recentTurns).toEqual([
         { role: 'user', content: '你好' },
         { role: 'assistant', content: '嗨' },
+        { role: 'user', content: '還好' },
+        { role: 'assistant', content: '那就好' },
       ])
     })
   })

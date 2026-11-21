@@ -16,6 +16,17 @@ function ttl() {
   return Math.floor(Date.now() / 1000) + TTL_DAYS * 86400
 }
 
+// Both items of a turn share one timestamp in their sort key (TURN#<iso>#user,
+// TURN#<iso>#asst) and "asst" sorts before "user", so key order is not the
+// order the conversation happened in.
+const ROLE_ORDER = { user: 0, assistant: 1 }
+function inConversationOrder(items) {
+  const at = (item) => item.sk.S.split('#')[1]
+  return items
+    .slice()
+    .sort((a, b) => at(a).localeCompare(at(b)) || ROLE_ORDER[a.role.S] - ROLE_ORDER[b.role.S])
+}
+
 export async function getContext(userId) {
   const pk = `USER#${userId}`
 
@@ -50,14 +61,10 @@ export async function getContext(userId) {
     isStaleSession = idleMs > SESSION_IDLE_HOURS * 3600 * 1000
   }
 
-  // reverse to chronological for prompt building
-  const recentTurns = rawItems
-    .slice()
-    .reverse()
-    .map((item) => ({
-      role: item.role.S,
-      content: item.content.S,
-    }))
+  const recentTurns = inConversationOrder(rawItems).map((item) => ({
+    role: item.role.S,
+    content: item.content.S,
+  }))
 
   const summary = summaryRes.Item ? summaryRes.Item.content.S : null
 
@@ -112,7 +119,7 @@ export async function compressOldTurns(userId, provider) {
     })
   )
 
-  const allItems = res.Items || []
+  const allItems = inConversationOrder(res.Items || [])
   const keepCount = MAX_TURNS * 2
   if (allItems.length <= keepCount) return
 
@@ -180,7 +187,7 @@ export async function archiveSession(userId, provider) {
     })
   )
 
-  const allItems = res.Items || []
+  const allItems = inConversationOrder(res.Items || [])
   if (allItems.length === 0) return
 
   const allTurns = allItems.map((item) => ({
