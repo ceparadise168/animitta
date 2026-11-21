@@ -3,8 +3,7 @@
 // retention and 清除記憶 guarantees live in those conditions, and it rejects
 // the requests real DynamoDB rejects (unused expression values, unaliased
 // reserved words, oversized or duplicate batches and transactions). Only the
-// syntax memory.mjs and the backfill script use is supported; anything else
-// throws.
+// syntax memory.mjs uses is supported; anything else throws.
 
 const failed = (name, message = name) => Object.assign(new Error(message), { name })
 const invalid = (message) => failed('ValidationException', message)
@@ -127,11 +126,6 @@ export function createFakeDynamoDb() {
       rows.set(keyOf(input.Key), applyUpdate(input, row))
       return {}
     },
-    Delete: (input) => {
-      if (!checkCondition(input, rows.get(keyOf(input.Key)))) throw failed('ConditionalCheckFailedException')
-      rows.delete(keyOf(input.Key))
-      return {}
-    },
     Query: (input) => {
       checkUnused(input, input.KeyConditionExpression)
       const values = input.ExpressionAttributeValues
@@ -145,11 +139,6 @@ export function createFakeDynamoDb() {
       const page = items.slice(0, size)
       const more = items.length > page.length
       return { Items: page, ...(more && { LastEvaluatedKey: { pk: page.at(-1).pk, sk: page.at(-1).sk } }) }
-    },
-    Scan: (input) => {
-      checkUnused(input, input.FilterExpression, input.ProjectionExpression)
-      const test = evaluator(input.FilterExpression, input.ExpressionAttributeNames, input.ExpressionAttributeValues)
-      return { Items: [...rows.values()].filter(test) }
     },
     BatchWrite: (input) => {
       const [table, requests] = Object.entries(input.RequestItems)[0]
@@ -198,8 +187,6 @@ export function createFakeDynamoDb() {
     GetItemCommand: command('Get'),
     PutItemCommand: command('Put'),
     UpdateItemCommand: command('Update'),
-    DeleteItemCommand: command('Delete'),
-    ScanCommand: command('Scan'),
     BatchWriteItemCommand: command('BatchWrite'),
     TransactWriteItemsCommand: command('Transact'),
   }
