@@ -10,8 +10,4 @@ export class LlmProvider {
   async summarize(existingSummary, turns) {
     throw new Error('summarize not implemented')
   }
-
-  async transcribeAudio(audioBuffer) {
-    throw new Error('transcribeAudio not implemented')
-  }
 }

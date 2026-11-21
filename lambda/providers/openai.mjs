@@ -72,24 +72,6 @@ export class OpenAiProvider extends LlmProvider {
     return data.choices[0].message.content
   }
 
-  async transcribeAudio(audioBuffer) {
-    const formData = new FormData()
-    formData.append('file', new Blob([audioBuffer]), 'audio.m4a')
-    formData.append('model', 'whisper-1')
-    formData.append('language', 'zh')
-
-    const res = await fetch(
-      'https://api.openai.com/v1/audio/transcriptions',
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.#apiKey}` },
-        body: formData,
-      }
-    )
-    if (!res.ok) throw new Error(`OpenAI transcription failed: ${res.status}`)
-    const data = await res.json()
-    return data.text || '無法識別音頻'
-  }
 }
 
 function parseChatContent(content) {

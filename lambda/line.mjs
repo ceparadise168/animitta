@@ -9,15 +9,6 @@ export function verifySignature(body, signature, secret) {
   }
 }
 
-export async function downloadContent(messageId) {
-  const res = await fetch(
-    `https://api-data.line.me/v2/bot/message/${messageId}/content`,
-    { headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}` } }
-  )
-  if (!res.ok) throw new Error(`LINE download failed: ${res.status}`)
-  return res.arrayBuffer()
-}
-
 export async function linkRichMenu(userId, richMenuId) {
   const res = await fetch(
     `https://api.line.me/v2/bot/user/${userId}/richmenu/${richMenuId}`,

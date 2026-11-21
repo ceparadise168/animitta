@@ -4,7 +4,6 @@ import { buildMessages } from '../prompt.mjs'
 import {
   replyMessage,
   replyWithQuickReplyMessage,
-  downloadContent,
   showLoadingIndicator,
 } from '../line.mjs'
 
@@ -59,13 +58,4 @@ export async function handleText(userId, replyToken, userText) {
   }
   await saveTurn(userId, userText, response)
   await compressOldTurns(userId, provider)
-}
-
-export async function handleAudio(userId, replyToken, messageId) {
-  const provider = getProvider()
-
-  const audioBuffer = await downloadContent(messageId)
-  const userText = await provider.transcribeAudio(audioBuffer)
-
-  await handleText(userId, replyToken, userText)
 }

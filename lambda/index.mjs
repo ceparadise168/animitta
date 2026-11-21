@@ -1,5 +1,5 @@
 import { verifySignature, replyMessage, linkRichMenu } from './line.mjs'
-import { handleText, handleAudio } from './services/chat.mjs'
+import { handleText } from './services/chat.mjs'
 import { handleCommand, handlePostback } from './commands.mjs'
 
 const WELCOME_MESSAGE =
@@ -13,6 +13,7 @@ const WELCOME_MESSAGE =
   '想聊什麼，隨時開口就好 😊'
 
 const FALLBACK_REPLY = '我這邊暫時卡住了，沒辦法好好回你。過一下再傳一次給我好嗎'
+const TEXT_ONLY_REPLY = '目前我只能讀文字，可以打字跟我說嗎'
 
 export async function handler(event) {
   const body = event.isBase64Encoded
@@ -52,7 +53,7 @@ export async function handler(event) {
       } else if (msg.type === 'text') {
         await handleText(userId, replyToken, msg.text)
       } else if (msg.type === 'audio') {
-        await handleAudio(userId, replyToken, msg.id)
+        await replyMessage(replyToken, TEXT_ONLY_REPLY)
       }
     }
   } catch (err) {

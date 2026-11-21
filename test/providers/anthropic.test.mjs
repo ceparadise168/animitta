@@ -161,19 +161,4 @@ describe('AnthropicProvider', () => {
     })
   })
 
-  describe('transcribeAudio', () => {
-    it('falls back to OpenAI Whisper', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ text: '語音轉文字' }),
-      })
-
-      const result = await provider.transcribeAudio(new ArrayBuffer(8))
-
-      expect(result).toBe('語音轉文字')
-      expect(mockFetch.mock.calls[0][0]).toBe(
-        'https://api.openai.com/v1/audio/transcriptions'
-      )
-    })
-  })
 })

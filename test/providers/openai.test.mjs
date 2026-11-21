@@ -87,17 +87,4 @@ describe('OpenAiProvider', () => {
     })
   })
 
-  describe('transcribeAudio', () => {
-    it('sends audio and returns transcript', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ text: '語音轉文字' }),
-      })
-
-      const audioBuffer = new ArrayBuffer(8)
-      const result = await provider.transcribeAudio(audioBuffer)
-
-      expect(result).toBe('語音轉文字')
-    })
-  })
 })

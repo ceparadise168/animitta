@@ -3,10 +3,8 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals'
 process.env.LINE_CHANNEL_SECRET = 'test-secret'
 
 const mockHandleText = jest.fn()
-const mockHandleAudio = jest.fn()
 jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({
   handleText: mockHandleText,
-  handleAudio: mockHandleAudio,
 }))
 
 const mockVerifySignature = jest.fn()
@@ -16,7 +14,6 @@ jest.unstable_mockModule('../lambda/line.mjs', () => ({
   replyMessage: mockReplyMessage,
   replyWithQuickReply: jest.fn(),
   replyWithQuickReplyMessage: jest.fn(),
-  downloadContent: jest.fn(),
   showLoadingIndicator: jest.fn().mockResolvedValue(undefined),
   linkRichMenu: jest.fn().mockResolvedValue(undefined),
 }))
@@ -37,7 +34,6 @@ describe('Lambda handler', () => {
     jest.clearAllMocks()
     mockVerifySignature.mockReturnValue(true)
     mockHandleText.mockResolvedValue(undefined)
-    mockHandleAudio.mockResolvedValue(undefined)
     mockHandleCommand.mockResolvedValue(undefined)
     mockHandlePostback.mockResolvedValue(undefined)
     mockTryHandleFeedbackText.mockResolvedValue(false)
@@ -68,7 +64,7 @@ describe('Lambda handler', () => {
     expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok', '你好')
   })
 
-  it('routes audio messages to handleAudio', async () => {
+  it('asks the user to type instead when a voice message arrives', async () => {
     const body = {
       events: [
         {
@@ -82,7 +78,8 @@ describe('Lambda handler', () => {
 
     await handler(makeEvent(body))
 
-    expect(mockHandleAudio).toHaveBeenCalledWith('u1', 'tok', 'audio123')
+    expect(mockReplyMessage).toHaveBeenCalledWith('tok', expect.stringContaining('打字'))
+    expect(mockHandleText).not.toHaveBeenCalled()
   })
 
   it('rejects invalid signature with 401', async () => {

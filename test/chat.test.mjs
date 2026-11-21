@@ -17,24 +17,21 @@ jest.unstable_mockModule('../lambda/providers/index.mjs', () => ({
 }))
 
 const mockReplyMessage = jest.fn()
-const mockDownloadContent = jest.fn()
 const mockReplyWithQuickReplyMessage = jest.fn()
 jest.unstable_mockModule('../lambda/line.mjs', () => ({
   replyMessage: mockReplyMessage,
   replyWithQuickReplyMessage: mockReplyWithQuickReplyMessage,
-  downloadContent: mockDownloadContent,
   verifySignature: jest.fn(),
   showLoadingIndicator: jest.fn().mockResolvedValue(undefined),
 }))
 
-const { handleText, handleAudio } = await import(
+const { handleText } = await import(
   '../lambda/services/chat.mjs'
 )
 
 describe('chat service', () => {
   const mockProvider = {
     chatCompletion: jest.fn(),
-    transcribeAudio: jest.fn(),
     summarize: jest.fn(),
   }
 
@@ -99,19 +96,4 @@ describe('chat service', () => {
     })
   })
 
-  describe('handleAudio', () => {
-    it('downloads audio, transcribes, then handles as text', async () => {
-      const audioBuffer = new ArrayBuffer(8)
-      mockDownloadContent.mockResolvedValue(audioBuffer)
-      mockProvider.transcribeAudio.mockResolvedValue('語音內容')
-      mockProvider.chatCompletion.mockResolvedValue({ text: '回覆', suggestions: [] })
-
-      await handleAudio('user1', 'token1', 'msg123')
-
-      expect(mockDownloadContent).toHaveBeenCalledWith('msg123')
-      expect(mockProvider.transcribeAudio).toHaveBeenCalledWith(audioBuffer)
-      expect(mockProvider.chatCompletion).toHaveBeenCalled()
-      expect(mockReplyMessage).toHaveBeenCalledWith('token1', '回覆')
-    })
-  })
 })
