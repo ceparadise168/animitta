@@ -20,6 +20,13 @@ export async function handleText(userId, replyToken, userText) {
   await remember(userId, context, userText, reply, provider)
 }
 
+// For a fixed bot line that the next message may answer, such as the
+// casual-chat opener. userSide records what the user did to get it.
+export async function replyAndRemember(userId, replyToken, userSide, reply) {
+  await replyMessage(replyToken, reply)
+  await remember(userId, await getContext(userId), userSide, reply, getProvider())
+}
+
 // Every exchange the bot takes part in is written here, so a new way of
 // talking to the bot cannot skip the session bookkeeping.
 async function remember(userId, { previousSession }, userText, reply, provider) {

@@ -1,5 +1,6 @@
 import { replyMessage, replyWithQuickReply } from './line.mjs'
 import { clearMemory } from './services/memory.mjs'
+import { replyAndRemember } from './services/chat.mjs'
 
 const CASUAL_CHAT_STARTERS = [
   '嗨，這邊很隨意，不用拘束\n\n想講最近煩你的事、一個轉不掉的念頭，或想問我金剛經裡的哪句話，都可以。不用先想好怎麼說，現在心裡最放不下的那件事，直接講出來就好',
@@ -18,7 +19,7 @@ const ABOUT_MESSAGE =
 export async function handleCommand(userId, replyToken, command) {
   switch (command) {
     case '@隨意聊聊':
-      return handleCasualChat(replyToken)
+      return handleCasualChat(userId, replyToken)
     case '@清除記憶':
       return handleClearMemory(replyToken)
     case '@關於':
@@ -30,7 +31,7 @@ export async function handleCommand(userId, replyToken, command) {
 
 export async function handlePostback(userId, replyToken, data) {
   if (data === 'action=casual_chat') {
-    return handleCasualChat(replyToken)
+    return handleCasualChat(userId, replyToken)
   }
   if (data === 'confirm:clear') {
     await clearMemory(userId)
@@ -41,10 +42,10 @@ export async function handlePostback(userId, replyToken, data) {
   }
 }
 
-async function handleCasualChat(replyToken) {
-  const text =
+async function handleCasualChat(userId, replyToken) {
+  const opener =
     CASUAL_CHAT_STARTERS[Math.floor(Math.random() * CASUAL_CHAT_STARTERS.length)]
-  return replyMessage(replyToken, text)
+  return replyAndRemember(userId, replyToken, '（按了選單的「隨意聊聊」）', opener)
 }
 
 async function handleClearMemory(replyToken) {

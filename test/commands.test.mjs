@@ -12,6 +12,11 @@ jest.unstable_mockModule('../lambda/services/memory.mjs', () => ({
   clearMemory: mockClearMemory,
 }))
 
+const mockReplyAndRemember = jest.fn()
+jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({
+  replyAndRemember: mockReplyAndRemember,
+}))
+
 const { handleCommand } = await import('../lambda/commands.mjs')
 
 describe('commands', () => {
@@ -20,6 +25,7 @@ describe('commands', () => {
     mockReplyMessage.mockResolvedValue(undefined)
     mockReplyWithQuickReply.mockResolvedValue(undefined)
     mockClearMemory.mockResolvedValue(undefined)
+    mockReplyAndRemember.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -31,7 +37,8 @@ describe('commands', () => {
 
     await handleCommand('user1', 'token1', '@隨意聊聊')
 
-    const text = mockReplyMessage.mock.calls[0][1]
+    const [userId, replyToken, , text] = mockReplyAndRemember.mock.calls[0]
+    expect([userId, replyToken]).toEqual(['user1', 'token1'])
     expect(text).toContain('不用先想好怎麼說')
     expect(text).toContain('金剛經')
     expect(text).not.toContain('今天想跟你分享一句金剛經')

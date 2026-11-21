@@ -97,7 +97,7 @@ function putTurn(minutesAgo, userText, botText) {
   }
 }
 
-const everythingSent = (request) => JSON.stringify({ system: request.system, messages: request.messages })
+const everythingSent = (request) => [request.system, ...request.messages.map((m) => m.content)].join('\n')
 
 describe('conversation memory, end to end', () => {
   beforeEach(() => {
@@ -149,4 +149,12 @@ describe('conversation memory, end to end', () => {
     expect(chatRequests[1].messages[0]).toEqual({ role: 'user', content: '她今天出院了' })
   })
 
+  it('remembers the casual-chat opener the user is answering', async () => {
+    await send({ type: 'postback', postback: { data: 'action=casual_chat' } })
+    const opener = lineReplies[0]
+
+    await sendText('一個人')
+
+    expect(everythingSent(chatRequests[0])).toContain(opener)
+  })
 })
