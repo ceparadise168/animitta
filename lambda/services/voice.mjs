@@ -9,17 +9,23 @@ const TABLE = process.env.MEMORY_TABLE_NAME
 export const VOICE_MINUTES_PER_MONTH = parseInt(process.env.VOICE_MINUTES_PER_MONTH || '30', 10)
 const LIMIT_SECONDS = VOICE_MINUTES_PER_MONTH * 60
 
-// LINE's reply token lasts one minute from the webhook. Transcription gets the
-// first 35 seconds, which leaves the model time to answer before the token goes.
-const TRANSCRIBE_BUDGET_MS = 35_000
+// LINE's reply token lasts one minute from the webhook, and the clock starts
+// when LINE sends it, not when this code runs: a cold start or an earlier
+// event in the same webhook has already used some of it. Transcription must
+// be done 40 seconds after the user sent the message, which leaves the model
+// time to answer before the token goes.
+const TRANSCRIBE_BUDGET_MS = 40_000
 // A month's counter outlives the month, and goes before the 90 days the 關於
 // message promises everything about a quiet user is gone.
 const COUNTER_DAYS = 40
 
 const REMEMBERED_AS = '（傳了一段語音）'
+// The bot did not hear this message, and it may be someone in crisis, so the
+// reply always carries the hotline the crisis rules in the prompt give.
 const OVER_LIMIT_REPLY =
-  `這個月可以傳語音的 ${VOICE_MINUTES_PER_MONTH} 分鐘用完了。` +
-  '想用說的，可以點鍵盤上的麥克風，說完會變成文字傳給我'
+  `這段語音超過這個月剩下的語音額度了（每個月 ${VOICE_MINUTES_PER_MONTH} 分鐘），我沒辦法聽。` +
+  '想用說的，可以點鍵盤上的麥克風，說完會變成文字傳給我。\n\n' +
+  '如果你現在很難受，1925 安心專線 24 小時都有人接'
 const NOTHING_HEARD_REPLY = '這段語音我沒聽到說話的聲音，可以再說一次，或打字給我嗎'
 
 // Months follow Taipei time, where the users are.
@@ -77,7 +83,6 @@ async function giveBackSeconds(userId, sentAt, seconds) {
  * full minute.
  */
 export async function handleVoice(userId, replyToken, message, sentAt) {
-  const startedAt = Date.now()
   const seconds = message.duration ? Math.ceil(message.duration / 1000) : 60
 
   if (!(await reserveSeconds(userId, sentAt, seconds))) {
@@ -87,7 +92,7 @@ export async function handleVoice(userId, replyToken, message, sentAt) {
   showLoadingIndicator(userId, 60).catch((err) => console.warn(err.message))
 
   try {
-    const deadline = startedAt + TRANSCRIBE_BUDGET_MS
+    const deadline = sentAt + TRANSCRIBE_BUDGET_MS
     const words = await transcribe(await downloadContent(message.id, deadline), { deadline })
     if (!words) return await replyAndRemember(userId, replyToken, REMEMBERED_AS, NOTHING_HEARD_REPLY, sentAt)
     return await handleText(userId, replyToken, words, sentAt)

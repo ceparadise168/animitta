@@ -11,6 +11,7 @@ const WELCOME_MESSAGE =
 
 const FALLBACK_REPLY = '我這邊暫時卡住了，沒辦法好好回你。過一下再傳一次給我好嗎'
 const TEXT_ONLY_REPLY = '這個我還看不懂，可以打字或傳語音跟我說嗎'
+const LINKED_AUDIO_REPLY = '這段語音我打不開，可以直接在 LINE 裡錄音傳給我，或打字跟我說嗎'
 
 // What the bot remembers the user sending when it cannot read the message.
 const UNREADABLE_MESSAGES = {
@@ -70,9 +71,11 @@ async function handleEvent(lineEvent) {
         await handleText(userId, replyToken, msg.text, sentAt)
       } else if (msg.type === 'sticker') {
         await handleText(userId, replyToken, stickerAsText(msg), sentAt)
-      } else if (msg.type === 'audio' && msg.contentProvider?.type !== 'external') {
+      } else if (msg.type === 'audio' && msg.contentProvider?.type === 'external') {
         // Audio hosted elsewhere comes as a link LINE cannot hand over, so only
         // recordings sent in LINE are heard.
+        await replyAndRemember(userId, replyToken, UNREADABLE_MESSAGES.audio, LINKED_AUDIO_REPLY, sentAt)
+      } else if (msg.type === 'audio') {
         await handleVoice(userId, replyToken, msg, sentAt)
       } else if (UNREADABLE_MESSAGES[msg.type]) {
         await replyAndRemember(userId, replyToken, UNREADABLE_MESSAGES[msg.type], TEXT_ONLY_REPLY, sentAt)

@@ -44,9 +44,10 @@ export class AnimittaStack extends cdk.Stack {
       handler: 'index.handler',
       code: lambda.Code.fromAsset(path.resolve(__dirname, '../../lambda')),
       memorySize: 256,
-      // A voice message takes about 10 to 25 seconds to transcribe before the
-      // model answers; LINE's reply token itself lasts one minute.
-      timeout: cdk.Duration.seconds(60),
+      // A voice message is transcribed and answered within LINE's one-minute
+      // reply token; after the reply, the memory may still be summarized, so
+      // the function gets more time than the token.
+      timeout: cdk.Duration.seconds(90),
       environment: {
         LLM_PROVIDER: process.env.LLM_PROVIDER || 'openai',
         OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',

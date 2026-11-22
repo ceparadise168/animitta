@@ -14,11 +14,15 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 /**
  * Turn a voice message into Taiwanese Mandarin text with Amazon Transcribe.
  * The recording and the transcript sit in VOICE_BUCKET_NAME only while the
- * job runs and are deleted before this returns, whether it worked or not. The
- * bucket also empties itself after a day, in case a delete never ran. Throws
- * if the job fails or is not done by the deadline (a Date.now() value).
+ * job runs and are deleted before this returns, whether it worked or not.
+ * One gap: Transcribe refuses to delete or stop a job still in progress, so a
+ * job that outruns the deadline writes its transcript after this cleanup. The
+ * bucket's expiry rule removes that one, and anything else a delete missed.
+ * Throws if the job fails or is not done by the deadline (a Date.now() value).
  */
-export async function transcribe(audio, { deadline, pollMs = 250 }) {
+// Two status checks a second keep each message well inside Transcribe's 30
+// GetTranscriptionJob calls a second for the account.
+export async function transcribe(audio, { deadline, pollMs = 500 }) {
   const bucket = process.env.VOICE_BUCKET_NAME
   const id = randomUUID()
   const jobName = `animitta-${id}`

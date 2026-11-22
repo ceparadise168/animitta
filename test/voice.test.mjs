@@ -37,7 +37,8 @@ jest.unstable_mockModule('@aws-sdk/client-s3', () => ({
   DeleteObjectsCommand: s3Command('DeleteMany'),
 }))
 
-// Transcribe: a job finishes on its second status check, with what `speech` says.
+// Transcribe: a job finishes on its second status check, with what `speech`
+// says. Like the real service, it refuses to delete a job still in progress.
 const jobs = new Map()
 const startedJobs = []
 const speech = { transcript: '最近工作壓力很大，晚上睡不著', fails: false, neverFinishes: false }
@@ -48,16 +49,20 @@ jest.unstable_mockModule('@aws-sdk/client-transcribe', () => ({
         const audioKey = input.Media.MediaFileUri.replace('s3://voice-bucket/', '')
         if (!objects.has(audioKey)) throw new Error('recording missing from S3')
         startedJobs.push(input)
-        jobs.set(input.TranscriptionJobName, { input, checks: 0 })
+        jobs.set(input.TranscriptionJobName, { input, checks: 0, status: 'IN_PROGRESS' })
         return {}
       }
       const job = jobs.get(input.TranscriptionJobName)
-      if (type === 'Delete') return jobs.delete(input.TranscriptionJobName), {}
+      if (type === 'Delete') {
+        if (job.status === 'IN_PROGRESS') throw Object.assign(new Error('job in progress'), { name: 'BadRequestException' })
+        return jobs.delete(input.TranscriptionJobName), {}
+      }
       job.checks++
-      if (speech.neverFinishes || job.checks < 2) return { TranscriptionJob: { TranscriptionJobStatus: 'IN_PROGRESS' } }
-      if (speech.fails) return { TranscriptionJob: { TranscriptionJobStatus: 'FAILED', FailureReason: 'bad audio' } }
-      objects.set(job.input.OutputKey, JSON.stringify({ results: { transcripts: [{ transcript: speech.transcript }] } }))
-      return { TranscriptionJob: { TranscriptionJobStatus: 'COMPLETED' } }
+      if (!speech.neverFinishes && job.checks >= 2) job.status = speech.fails ? 'FAILED' : 'COMPLETED'
+      if (job.status === 'COMPLETED') {
+        objects.set(job.input.OutputKey, JSON.stringify({ results: { transcripts: [{ transcript: speech.transcript }] } }))
+      }
+      return { TranscriptionJob: { TranscriptionJobStatus: job.status, FailureReason: speech.fails ? 'bad audio' : undefined } }
     }
   },
   StartTranscriptionJobCommand: s3Command('Start'),
@@ -95,10 +100,11 @@ const { transcribe } = await import('../lambda/services/transcribe.mjs')
 
 const USER = 'U-voice'
 const PK = `USER#${USER}`
-// 2026-11-23 10:00 in Taipei.
+// The clock starts at 2026-11-23 10:00 in Taipei and runs at real speed, so a
+// message sent "now" has its full minute to be answered.
 const NOV = Date.parse('2026-11-23T02:00:00Z')
 let replyTokens = 0
-function sendVoice({ seconds = 12, at = NOV, provider = 'line' } = {}) {
+function sendVoice({ seconds = 12, at = Date.now(), provider = 'line' } = {}) {
   const message = { type: 'audio', id: `m-${++replyTokens}`, duration: seconds * 1000, contentProvider: { type: provider } }
   const body = JSON.stringify({ events: [{ type: 'message', replyToken: `rt-${replyTokens}`, timestamp: at, source: { type: 'user', userId: USER }, message }] })
   const signature = createHmac('SHA256', 'test-secret').update(body).digest('base64')
@@ -124,8 +130,12 @@ describe('voice messages', () => {
     line.notReadyFor = 0
     errorLog = jest.spyOn(console, 'error').mockImplementation(() => {})
     jest.spyOn(console, 'warn').mockImplementation(() => {})
+    jest.useFakeTimers({ now: NOV, advanceTimers: true })
   })
-  afterEach(() => jest.restoreAllMocks())
+  afterEach(() => {
+    jest.useRealTimers()
+    jest.restoreAllMocks()
+  })
 
   it('answers a voice message as if the user had typed what they said', async () => {
     await sendVoice({ seconds: 12 })
@@ -157,7 +167,7 @@ describe('voice messages', () => {
     await sendVoice({ seconds: 1 })
 
     expect(usedSeconds('2026-11')).toBe(30 * 60)
-    expect(lineReplies[1]).toContain('30 分鐘用完了')
+    expect(lineReplies[1]).toContain('超過這個月剩下的語音額度了（每個月 30 分鐘）')
     expect(lineReplies[1]).toContain('鍵盤上的麥克風')
     expect(chatRequests).toHaveLength(1)
     expect(userTurns()).toEqual(['最近工作壓力很大，晚上睡不著', '（傳了一段語音）'])
@@ -166,8 +176,16 @@ describe('voice messages', () => {
   it('refuses a single recording longer than the whole month allows', async () => {
     await sendVoice({ seconds: 31 * 60 })
 
-    expect(lineReplies[0]).toContain('用完了')
+    expect(lineReplies[0]).toContain('超過這個月剩下的語音額度')
     expect(usedSeconds('2026-11')).toBe(0)
+  })
+
+  it('gives the hotline with the limit reply, since the bot did not hear what was said', async () => {
+    setUsed('2026-11', 30 * 60)
+
+    await sendVoice()
+
+    expect(lineReplies[0]).toContain('1925 安心專線')
   })
 
   it('lets only one of two messages that arrive together take the last minutes', async () => {
@@ -183,7 +201,8 @@ describe('voice messages', () => {
     setUsed('2026-11', 30 * 60)
 
     // 2026-12-01 00:30 in Taipei, still November in UTC.
-    await sendVoice({ seconds: 12, at: Date.parse('2026-11-30T16:30:00Z') })
+    jest.setSystemTime(Date.parse('2026-11-30T16:30:00Z'))
+    await sendVoice({ seconds: 12 })
 
     expect(chatRequests).toHaveLength(1)
     expect(usedSeconds('2026-12')).toBe(12)
@@ -199,6 +218,16 @@ describe('voice messages', () => {
     expect(errorLog.mock.calls[0][0]).toBe('Handler error:')
     expect(objects.size).toBe(0)
     expect(jobs.size).toBe(0)
+  })
+
+  it('gives up, gives the minutes back and apologises when the message is too old to answer within the reply token', async () => {
+    // LINE sent it 50 seconds ago (a cold start, or earlier events in the same webhook).
+    await sendVoice({ seconds: 12, at: Date.now() - 50_000 })
+
+    expect(chatRequests).toHaveLength(0)
+    expect(usedSeconds('2026-11')).toBe(0)
+    expect(lineReplies[0]).toContain('卡住')
+    expect(objects.size).toBe(0)
   })
 
   it('says it heard nothing when the recording has no speech, without asking the model', async () => {
@@ -229,12 +258,12 @@ describe('transcribe', () => {
   })
   afterEach(() => jest.restoreAllMocks())
 
-  it('gives up at the deadline and still deletes the recording', async () => {
+  it('gives up at the deadline and still deletes the recording, though the running job cannot be deleted', async () => {
     speech.neverFinishes = true
 
     await expect(transcribe(Buffer.from('m4a'), { deadline: Date.now() + 30, pollMs: 10 })).rejects.toThrow('deadline')
 
     expect(objects.size).toBe(0)
-    expect(jobs.size).toBe(0)
+    expect([...jobs.values()].map((job) => job.status)).toEqual(['IN_PROGRESS'])
   })
 })

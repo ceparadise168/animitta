@@ -80,7 +80,7 @@ describe('Lambda handler', () => {
     expect(mockReplyAndRemember).not.toHaveBeenCalled()
   })
 
-  it('asks for text or a recording when audio hosted elsewhere arrives, which LINE cannot hand over', async () => {
+  it('asks for a recording made in LINE, or text, when audio hosted elsewhere arrives, which LINE cannot hand over', async () => {
     const message = { type: 'audio', id: 'audio123', contentProvider: { type: 'external', originalContentUrl: 'https://example.com/a.m4a' } }
     const body = {
       events: [{ type: 'message', replyToken: 'tok', timestamp: SENT_AT, source: { type: 'user', userId: 'u1' }, message }],
@@ -89,7 +89,7 @@ describe('Lambda handler', () => {
     await handler(makeEvent(body))
 
     expect(mockHandleVoice).not.toHaveBeenCalled()
-    expect(mockReplyAndRemember).toHaveBeenCalledWith('u1', 'tok', '（傳了一段語音）', expect.stringContaining('打字'), SENT_AT)
+    expect(mockReplyAndRemember).toHaveBeenCalledWith('u1', 'tok', '（傳了一段語音）', expect.stringContaining('在 LINE 裡錄音'), SENT_AT)
   })
 
   it('asks for text when a photo arrives, and remembers that a photo came', async () => {
