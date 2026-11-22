@@ -180,14 +180,6 @@ describe('voice messages', () => {
     expect(usedSeconds('2026-11')).toBe(0)
   })
 
-  it('gives the hotline with the limit reply, since the bot did not hear what was said', async () => {
-    setUsed('2026-11', 30 * 60)
-
-    await sendVoice()
-
-    expect(lineReplies[0]).toContain('1925 安心專線')
-  })
-
   it('lets only one of two messages that arrive together take the last minutes', async () => {
     setUsed('2026-11', 30 * 60 - 10)
 

@@ -50,6 +50,7 @@ LINE App → Lambda Function URL → Lambda (Node.js 22.x) → OpenAI / Anthropi
 - AWS CLI configured with appropriate permissions
 - LINE Messaging API channel (Channel Access Token + Channel Secret)
 - OpenAI API key (and/or Anthropic API key)
+- The AWS account opted out of AI service improvement, through an AWS Organizations AI services opt-out policy. 關於 tells users a voice recording is deleted once transcribed, which holds only then. Before deploying to any account, including after moving to another one, check that this prints `optOut`: `aws organizations describe-effective-policy --policy-type AISERVICES_OPT_OUT_POLICY`
 
 ### Setup
 
@@ -82,6 +83,7 @@ Key variables:
 - `CHAT_MODEL_OPENAI`: Model for conversation (e.g., `gpt-4.1-mini`)
 - `MAX_RECENT_TURNS`: Number of recent conversation turns to keep (default: 5)
 - `CONVERSATION_TTL_DAYS`: Days without a message after which everything remembered is deleted (default: 90). 關於 quotes it to users
+- `VOICE_MINUTES_PER_MONTH`: Voice minutes each user may send a month (default: 30). 關於 quotes it to users
 
 ## Project Structure
 

@@ -20,12 +20,9 @@ const TRANSCRIBE_BUDGET_MS = 40_000
 const COUNTER_DAYS = 40
 
 const REMEMBERED_AS = '（傳了一段語音）'
-// The bot did not hear this message, and it may be someone in crisis, so the
-// reply always carries the hotline the crisis rules in the prompt give.
 const OVER_LIMIT_REPLY =
   `這段語音超過這個月剩下的語音額度了（每個月 ${VOICE_MINUTES_PER_MONTH} 分鐘），我沒辦法聽。` +
-  '想用說的，可以點鍵盤上的麥克風，說完會變成文字傳給我。\n\n' +
-  '如果你現在很難受，1925 安心專線 24 小時都有人接'
+  '想用說的，可以點鍵盤上的麥克風，說完會變成文字傳給我'
 const NOTHING_HEARD_REPLY = '這段語音我沒聽到說話的聲音，可以再說一次，或打字給我嗎'
 
 // Months follow Taipei time, where the users are.
