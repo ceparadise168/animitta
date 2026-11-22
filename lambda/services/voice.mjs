@@ -1,6 +1,7 @@
 import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb'
 import { downloadContent, showLoadingIndicator } from '../line.mjs'
 import { transcribe } from './transcribe.mjs'
+import { whyRecordingsMayBeKept } from './ai-opt-out.mjs'
 import { handleText, replyAndRemember } from './chat.mjs'
 
 const client = new DynamoDBClient()
@@ -24,6 +25,8 @@ const OVER_LIMIT_REPLY =
   `這段語音超過這個月剩下的語音額度了（每個月 ${VOICE_MINUTES_PER_MONTH} 分鐘），我沒辦法聽。` +
   '想用說的，可以點鍵盤上的麥克風，說完會變成文字傳給我'
 const NOTHING_HEARD_REPLY = '這段語音我沒聽到說話的聲音，可以再說一次，或打字給我嗎'
+// Not "send it again": the pause lasts until the account is fixed.
+const PAUSED_REPLY = '語音這邊暫時沒辦法聽，可以先打字，或點鍵盤上的麥克風說給我聽嗎'
 
 // Months follow Taipei time, where the users are.
 const monthOf = (sentAt) => new Date(sentAt + 8 * 3600_000).toISOString().slice(0, 7)
@@ -80,6 +83,14 @@ async function giveBackSeconds(userId, sentAt, seconds) {
  * full minute.
  */
 export async function handleVoice(userId, replyToken, message, sentAt) {
+  // Checked first, so a paused voice uses none of the user's minutes. The log
+  // line raises the same alarm as a failed reply.
+  const risk = await whyRecordingsMayBeKept()
+  if (risk) {
+    console.error(`Handler error: voice paused, the recording was not sent to Amazon, because ${risk}`)
+    return replyAndRemember(userId, replyToken, REMEMBERED_AS, PAUSED_REPLY, sentAt)
+  }
+
   const seconds = message.duration ? Math.ceil(message.duration / 1000) : 60
 
   if (!(await reserveSeconds(userId, sentAt, seconds))) {

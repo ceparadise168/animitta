@@ -70,6 +70,21 @@ jest.unstable_mockModule('@aws-sdk/client-transcribe', () => ({
   DeleteTranscriptionJobCommand: s3Command('Delete'),
 }))
 
+// Organizations: what this account's effective AI services opt-out policy says,
+// or the error the call fails with.
+const account = { optOut: null, error: null }
+const optedOutForAll = { services: { default: { opt_out_policy: 'optOut' } } }
+jest.unstable_mockModule('@aws-sdk/client-organizations', () => ({
+  OrganizationsClient: class {
+    async send({ input }) {
+      if (input.PolicyType !== 'AISERVICES_OPT_OUT_POLICY') throw new Error(`unexpected policy type ${input.PolicyType}`)
+      if (account.error) throw Object.assign(new Error(account.error), { name: account.error })
+      return { EffectivePolicy: { PolicyContent: JSON.stringify(account.optOut) } }
+    }
+  },
+  DescribeEffectivePolicyCommand: s3Command('DescribeEffectivePolicy'),
+}))
+
 const chatRequests = []
 const lineReplies = []
 const loadingCalls = []
@@ -128,6 +143,7 @@ describe('voice messages', () => {
     loadingCalls.length = 0
     Object.assign(speech, { transcript: '最近工作壓力很大，晚上睡不著', fails: false, neverFinishes: false })
     line.notReadyFor = 0
+    Object.assign(account, { optOut: optedOutForAll, error: null })
     errorLog = jest.spyOn(console, 'error').mockImplementation(() => {})
     jest.spyOn(console, 'warn').mockImplementation(() => {})
     jest.useFakeTimers({ now: NOV, advanceTimers: true })
@@ -220,6 +236,48 @@ describe('voice messages', () => {
     expect(usedSeconds('2026-11')).toBe(0)
     expect(lineReplies[0]).toContain('卡住')
     expect(objects.size).toBe(0)
+  })
+
+  describe('when Amazon may keep what Transcribe hears', () => {
+    const paused = async () => {
+      await sendVoice({ seconds: 12 })
+
+      expect(startedJobs).toHaveLength(0)
+      expect(objects.size).toBe(0)
+      expect(usedSeconds('2026-11')).toBe(0)
+      expect(lineReplies[0]).toContain('語音這邊暫時沒辦法聽')
+      expect(lineReplies[0]).not.toContain('再傳一次')
+      expect(userTurns()).toEqual(['（傳了一段語音）'])
+      expect(errorLog.mock.calls[0][0]).toMatch(/^Handler error: voice paused/)
+    }
+
+    it('pauses voice when the account is in no organization, as during a move between organizations', async () => {
+      account.error = 'AWSOrganizationsNotInUseException'
+      await paused()
+    })
+
+    it('pauses voice when no opt-out policy applies to the account', async () => {
+      account.error = 'EffectivePolicyNotFoundException'
+      await paused()
+    })
+
+    it('pauses voice when the policy opts Transcribe back in, even if everything else is opted out', async () => {
+      account.optOut = { services: { default: { opt_out_policy: 'optOut' }, transcribe: { opt_out_policy: 'optIn' } } }
+      await paused()
+    })
+
+    it('pauses voice when the opt-out cannot be checked', async () => {
+      account.error = 'TooManyRequestsException'
+      await paused()
+    })
+  })
+
+  it('hears voice when Transcribe itself is opted out, with no default in the policy', async () => {
+    account.optOut = { services: { transcribe: { opt_out_policy: 'optOut' } } }
+
+    await sendVoice()
+
+    expect(chatRequests).toHaveLength(1)
   })
 
   it('says it heard nothing when the recording has no speech, without asking the model', async () => {

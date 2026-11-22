@@ -76,6 +76,9 @@ export class AnimittaStack extends cdk.Stack {
     // IAM cannot narrow StartTranscriptionJob to a job name; the other two
     // stay limited to the jobs this function names.
     fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['transcribe:StartTranscriptionJob'], resources: ['*'] }))
+    // Read before every recording: voice pauses unless this account is opted
+    // out of AI service improvement for Transcribe.
+    fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['organizations:DescribeEffectivePolicy'], resources: ['*'] }))
     fn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['transcribe:GetTranscriptionJob', 'transcribe:DeleteTranscriptionJob'],
@@ -125,7 +128,7 @@ export class AnimittaStack extends cdk.Stack {
     new cloudwatch.Alarm(this, 'HandlerFailureAlarm', {
       alarmName: 'animitta-handler-failures',
       alarmDescription:
-        '無相界有訊息沒處理完：可能沒回成功，也可能回了但記憶沒存好（AI 呼叫失敗、逾時或程式錯誤）。到 CloudWatch Logs /aws/lambda/animitta 搜尋 "Handler error" 或 "Task timed out" 看原因。',
+        '無相界有訊息沒處理完：可能沒回成功，也可能回了但記憶沒存好（AI 呼叫失敗、逾時或程式錯誤），或語音因為這個 AWS 帳號沒有 AI 服務 opt-out 而暫停（log 會寫 "voice paused"）。到 CloudWatch Logs /aws/lambda/animitta 搜尋 "Handler error" 或 "Task timed out" 看原因。',
       metric: failures,
       threshold: 1,
       evaluationPeriods: 1,
