@@ -15,7 +15,7 @@ process.env.VOICE_MINUTES_ALL_USERS_PER_MONTH = '1500'
 
 const fake = createFakeDynamoDb()
 jest.unstable_mockModule('@aws-sdk/client-dynamodb', () => fake.module)
-const { rows } = fake
+const { rows, hooks } = fake
 
 // S3: objects by key.
 const objects = new Map()
@@ -73,12 +73,17 @@ jest.unstable_mockModule('@aws-sdk/client-transcribe', () => ({
 
 // Organizations: what this account's effective AI services opt-out policy says,
 // or the error the call fails with.
-const account = { optOut: null, error: null }
+const account = { optOut: null, error: null, hangs: false }
 const optedOutForAll = { services: { default: { opt_out_policy: 'optOut' } } }
 jest.unstable_mockModule('@aws-sdk/client-organizations', () => ({
   OrganizationsClient: class {
-    async send({ input }) {
+    async send({ input }, options = {}) {
       if (input.PolicyType !== 'AISERVICES_OPT_OUT_POLICY') throw new Error(`unexpected policy type ${input.PolicyType}`)
+      if (account.hangs) {
+        return new Promise((_, reject) =>
+          options.abortSignal?.addEventListener('abort', () => reject(Object.assign(new Error('Request aborted'), { name: 'AbortError' })))
+        )
+      }
       if (account.error) throw Object.assign(new Error(account.error), { name: account.error })
       return { EffectivePolicy: { PolicyContent: JSON.stringify(account.optOut) } }
     }
@@ -90,6 +95,7 @@ const chatRequests = []
 const lineReplies = []
 const loadingCalls = []
 const line = { notReadyFor: 0 }
+const llm = { summaryFails: false }
 global.fetch = async (url, init = {}) => {
   const ok = (body) => ({ ok: true, status: 200, json: async () => body })
   url = String(url)
@@ -108,6 +114,7 @@ global.fetch = async (url, init = {}) => {
   if (url.startsWith('https://api.line.me/')) return ok({})
   const body = JSON.parse(init.body)
   if (body.system) chatRequests.push(body)
+  else if (llm.summaryFails) return { ok: false, status: 529, json: async () => ({}) }
   return ok({ stop_reason: 'end_turn', content: [{ type: 'text', text: '（模型的回覆）' }] })
 }
 
@@ -134,6 +141,16 @@ function setCounter(pk, month, seconds) {
 }
 const setUsed = (month, seconds) => setCounter(PK, month, seconds)
 const setEveryone = (month, seconds) => setCounter('ALL_USERS', month, seconds)
+// Earlier exchanges a few minutes ago, so this one pushes the oldest into the summary.
+function putTurns(count) {
+  for (let i = 0; i < count; i++) {
+    const iso = new Date(Date.now() - (count - i) * 60_000).toISOString()
+    for (const [role, suffix] of [['user', 'user'], ['assistant', 'asst']]) {
+      const sk = `TURN#${iso}#${suffix}`
+      rows.set(`${PK}|${sk}`, { pk: { S: PK }, sk: { S: sk }, role: { S: role }, content: { S: `第 ${i + 1} 句` } })
+    }
+  }
+}
 const userTurns = () => [...rows.values()].filter((r) => r.sk.S.startsWith('TURN#') && r.role.S === 'user').map((r) => r.content.S)
 
 describe('voice messages', () => {
@@ -148,7 +165,9 @@ describe('voice messages', () => {
     loadingCalls.length = 0
     Object.assign(speech, { transcript: '最近工作壓力很大，晚上睡不著', fails: false, neverFinishes: false })
     line.notReadyFor = 0
-    Object.assign(account, { optOut: optedOutForAll, error: null })
+    llm.summaryFails = false
+    hooks.beforeUpdate = () => {}
+    Object.assign(account, { optOut: optedOutForAll, error: null, hangs: false })
     errorLog = jest.spyOn(console, 'error').mockImplementation(() => {})
     warnLog = jest.spyOn(console, 'warn').mockImplementation(() => {})
     jest.useFakeTimers({ now: NOV, advanceTimers: true })
@@ -196,11 +215,23 @@ describe('voice messages', () => {
     expect(userTurns()).toEqual(['最近工作壓力很大，晚上睡不著', '（傳了一段語音）'])
   })
 
-  it('refuses a single recording longer than the whole month allows', async () => {
+  it('turns away a recording over 3 minutes before anything is counted or paid for, and asks for shorter pieces', async () => {
+    await sendVoice({ seconds: 3 * 60 + 1 })
     await sendVoice({ seconds: 31 * 60 })
 
-    expect(lineReplies[0]).toContain('超過這個月剩下的語音額度')
+    expect(lineReplies[0]).toContain('我一次最多能聽 3 分鐘')
+    expect(lineReplies[0]).toContain('分成短一點的幾段')
+    expect(lineReplies[1]).toContain('我一次最多能聽 3 分鐘')
+    expect(startedJobs).toHaveLength(0)
     expect(usedSeconds('2026-11')).toBe(0)
+    expect(everyoneSeconds('2026-11')).toBe(0)
+  })
+
+  it('hears a recording of exactly 3 minutes', async () => {
+    await sendVoice({ seconds: 3 * 60 })
+
+    expect(chatRequests).toHaveLength(1)
+    expect(usedSeconds('2026-11')).toBe(180)
   })
 
   it('stops everyone at the monthly total for all users, says when voice comes back, and raises the alarm', async () => {
@@ -258,13 +289,13 @@ describe('voice messages', () => {
     expect(usedSeconds('2026-12')).toBe(12)
   })
 
-  it('gives the minutes back, apologises and raises the alarm when transcription fails, leaving nothing behind', async () => {
+  it('gives the user their minutes back but keeps them in everyone\'s count when a transcription fails, apologises, raises the alarm and leaves nothing behind', async () => {
     speech.fails = true
 
     await sendVoice({ seconds: 12 })
 
     expect(usedSeconds('2026-11')).toBe(0)
-    expect(everyoneSeconds('2026-11')).toBe(0)
+    expect(everyoneSeconds('2026-11')).toBe(12)
     expect(lineReplies[0]).toContain('卡住')
     expect(errorLog.mock.calls[0][0]).toBe('Handler error:')
     expect(objects.size).toBe(0)
@@ -276,7 +307,9 @@ describe('voice messages', () => {
     await sendVoice({ seconds: 12, at: Date.now() - 50_000 })
 
     expect(chatRequests).toHaveLength(0)
+    expect(startedJobs).toHaveLength(0)
     expect(usedSeconds('2026-11')).toBe(0)
+    expect(everyoneSeconds('2026-11')).toBe(0)
     expect(lineReplies[0]).toContain('卡住')
     expect(objects.size).toBe(0)
   })
@@ -323,6 +356,70 @@ describe('voice messages', () => {
     expect(chatRequests).toHaveLength(1)
   })
 
+  it('keeps everyone\'s count but gives the user back their minutes when a job outruns the deadline', async () => {
+    speech.neverFinishes = true
+
+    const handled = sendVoice({ seconds: 12 })
+    while (startedJobs.length === 0) await new Promise((resolve) => setImmediate(resolve))
+    jest.setSystemTime(Date.now() + 45_000)
+    await handled
+
+    expect(startedJobs).toHaveLength(1)
+    expect(usedSeconds('2026-11')).toBe(0)
+    expect(everyoneSeconds('2026-11')).toBe(12)
+    expect(lineReplies[0]).toContain('卡住')
+  })
+
+  it('keeps the minutes counted once the answer has been sent, even if remembering the exchange then fails', async () => {
+    putTurns(5)
+    llm.summaryFails = true
+
+    await sendVoice({ seconds: 12 })
+
+    expect(lineReplies[0]).toBe('（模型的回覆）')
+    expect(usedSeconds('2026-11')).toBe(12)
+    expect(everyoneSeconds('2026-11')).toBe(12)
+  })
+
+  it('gives the user their seconds back when counting them against everyone fails', async () => {
+    hooks.beforeUpdate = (input) => {
+      if (input.Key.pk.S === 'ALL_USERS' && input.UpdateExpression.startsWith('SET')) {
+        throw Object.assign(new Error('DynamoDB is unavailable'), { name: 'InternalServerError' })
+      }
+    }
+
+    await sendVoice({ seconds: 12 })
+
+    expect(usedSeconds('2026-11')).toBe(0)
+    expect(startedJobs).toHaveLength(0)
+    expect(lineReplies[0]).toContain('卡住')
+  })
+
+  it('raises the alarm with what to add back, naming the user only by a hash, when a give-back fails', async () => {
+    speech.fails = true
+    hooks.beforeUpdate = (input) => {
+      if (input.UpdateExpression === 'ADD #used :refund') throw Object.assign(new Error('throttled'), { name: 'ThrottlingException' })
+    }
+
+    await sendVoice({ seconds: 12 })
+
+    const lines = errorLog.mock.calls.map((call) => String(call[0]))
+    expect(lines).toContainEqual(expect.stringMatching(/^Handler error: voice seconds not given back: 12 s for user [0-9a-f]{12} in 2026-11 \(ThrottlingException\)$/))
+    expect(lines.join('\n')).not.toContain(USER)
+  })
+
+  it('pauses voice within a few seconds when the opt-out check does not answer', async () => {
+    account.hangs = true
+    const startedAt = performance.now()
+
+    await sendVoice({ seconds: 12 })
+
+    expect(performance.now() - startedAt).toBeLessThan(4_500)
+    expect(startedJobs).toHaveLength(0)
+    expect(lineReplies[0]).toContain('語音這邊暫時沒辦法聽')
+    expect(usedSeconds('2026-11')).toBe(0)
+  }, 10_000)
+
   it('says it heard nothing when the recording has no speech, without asking the model', async () => {
     speech.transcript = '  '
 
@@ -351,11 +448,25 @@ describe('transcribe', () => {
   })
   afterEach(() => jest.restoreAllMocks())
 
+  it('starts no job and uploads nothing when too little time is left for one', async () => {
+    await expect(transcribe(Buffer.from('m4a'), { deadline: Date.now() + 5_000 })).rejects.toThrow('Too little time')
+
+    expect(objects.size).toBe(0)
+    expect(jobs.size).toBe(0)
+  })
+
   it('gives up at the deadline and still deletes the recording, though the running job cannot be deleted', async () => {
     speech.neverFinishes = true
+    jest.useFakeTimers({ advanceTimers: true })
+    let jobAskedFor = false
 
-    await expect(transcribe(Buffer.from('m4a'), { deadline: Date.now() + 30, pollMs: 10 })).rejects.toThrow('deadline')
+    const done = transcribe(Buffer.from('m4a'), { deadline: Date.now() + 20_000, pollMs: 10, onJobStart: () => (jobAskedFor = true) })
+    while (jobs.size === 0) await new Promise((resolve) => setImmediate(resolve))
+    jest.setSystemTime(Date.now() + 25_000)
 
+    await expect(done).rejects.toThrow('deadline')
+    jest.useRealTimers()
+    expect(jobAskedFor).toBe(true)
     expect(objects.size).toBe(0)
     expect([...jobs.values()].map((job) => job.status)).toEqual(['IN_PROGRESS'])
   })

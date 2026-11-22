@@ -41,6 +41,15 @@ describe('AnthropicProvider', () => {
       expect(callBody.messages).toEqual([{ role: 'user', content: '你好' }])
     })
 
+    it('hands the abort signal to the request, so a stuck call can be given up on', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ content: [{ type: 'text', text: '回覆' }] }) })
+      const signal = AbortSignal.timeout(10_000)
+
+      await provider.chatCompletion([{ role: 'user', content: '你好' }], { signal })
+
+      expect(mockFetch.mock.calls[0][1].signal).toBe(signal)
+    })
+
     it('merges consecutive same-role messages', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,

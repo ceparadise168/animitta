@@ -7,15 +7,27 @@ function stripMarkdown(text) {
   return text.replace(/[*#_~`>]/g, '')
 }
 
-export async function handleText(userId, replyToken, userText, sentAt) {
+// LINE's reply token lasts one minute from the webhook. A model still writing
+// 55 seconds after the user sent the message is given up on (it gets at least
+// 5 seconds), so the fallback apology still reaches the user in time.
+const answerWithin = (sentAt) => Math.max(5_000, sentAt + 55_000 - Date.now())
+
+/**
+ * Answer the user's words. onReplied runs once the reply has reached LINE, so
+ * a caller can tell a failure before the answer from one after it.
+ */
+export async function handleText(userId, replyToken, userText, sentAt, { onReplied } = {}) {
   const provider = getProvider()
 
   showLoadingIndicator(userId).catch((err) => console.warn(err.message))
 
   const context = await getContext(userId)
-  const { text } = await provider.chatCompletion(buildMessages({ ...context, userInput: userText }))
+  const { text } = await provider.chatCompletion(buildMessages({ ...context, userInput: userText }), {
+    signal: AbortSignal.timeout(answerWithin(sentAt)),
+  })
   const reply = stripMarkdown(text)
   await replyMessage(replyToken, reply)
+  onReplied?.()
 
   await remember(userId, context, userText, reply, provider, sentAt)
 }

@@ -3,6 +3,9 @@ import { OrganizationsClient, DescribeEffectivePolicyCommand } from '@aws-sdk/cl
 // Organizations has one global endpoint, in us-east-1, whatever region the
 // function runs in.
 const client = new OrganizationsClient({ region: 'us-east-1' })
+// A check that does not answer pauses voice rather than holding the reply
+// past LINE's one-minute reply token.
+const CHECK_TIMEOUT_MS = 3_000
 
 /**
  * Why Amazon may keep what Transcribe hears to improve its AI services, or
@@ -16,7 +19,8 @@ const client = new OrganizationsClient({ region: 'us-east-1' })
 export async function whyRecordingsMayBeKept() {
   try {
     const { EffectivePolicy } = await client.send(
-      new DescribeEffectivePolicyCommand({ PolicyType: 'AISERVICES_OPT_OUT_POLICY' })
+      new DescribeEffectivePolicyCommand({ PolicyType: 'AISERVICES_OPT_OUT_POLICY' }),
+      { abortSignal: AbortSignal.timeout(CHECK_TIMEOUT_MS) }
     )
     const services = JSON.parse(EffectivePolicy.PolicyContent).services ?? {}
     const setting = (services.transcribe ?? services.default)?.opt_out_policy

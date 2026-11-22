@@ -10,6 +10,10 @@ import {
 const s3 = new S3Client()
 const transcribeClient = new TranscribeClient()
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+// Jobs measured in Tokyo took 8 to 21 seconds, for 12 seconds to 3.5 minutes of
+// audio. With less time than this left, a job would be paid for and then given
+// up on, so none is started.
+const LEAST_TIME_FOR_A_JOB_MS = 15_000
 
 /**
  * Turn a voice message into Taiwanese Mandarin text with Amazon Transcribe.
@@ -19,10 +23,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  * job that outruns the deadline writes its transcript after this cleanup. The
  * bucket's expiry rule removes that one, and anything else a delete missed.
  * Throws if the job fails or is not done by the deadline (a Date.now() value).
+ *
+ * onJobStart runs just before the job is asked for: from then on, Amazon may
+ * bill the audio. Two status checks a second keep each message well inside
+ * Transcribe's 30 GetTranscriptionJob calls a second for the account.
  */
-// Two status checks a second keep each message well inside Transcribe's 30
-// GetTranscriptionJob calls a second for the account.
-export async function transcribe(audio, { deadline, pollMs = 500 }) {
+export async function transcribe(audio, { deadline, pollMs = 500, onJobStart }) {
+  if (Date.now() > deadline - LEAST_TIME_FOR_A_JOB_MS) throw new Error('Too little time left to transcribe before the deadline')
   const bucket = process.env.VOICE_BUCKET_NAME
   const id = randomUUID()
   const jobName = `animitta-${id}`
@@ -32,6 +39,7 @@ export async function transcribe(audio, { deadline, pollMs = 500 }) {
 
   try {
     await s3.send(new PutObjectCommand({ Bucket: bucket, Key: audioKey, Body: audio }))
+    onJobStart?.()
     await transcribeClient.send(
       new StartTranscriptionJobCommand({
         TranscriptionJobName: jobName,

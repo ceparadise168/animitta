@@ -16,11 +16,12 @@ export class AnthropicProvider extends LlmProvider {
       process.env.SUMMARY_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
   }
 
-  async chatCompletion(messages) {
+  async chatCompletion(messages, { signal } = {}) {
     const { system, userMessages } = this.#extractSystem(messages)
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
+      signal,
       headers: {
         'x-api-key': this.#apiKey,
         'anthropic-version': '2023-06-01',

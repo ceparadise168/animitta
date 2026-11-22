@@ -37,6 +37,15 @@ describe('OpenAiProvider', () => {
       )
     })
 
+    it('hands the abort signal to the request, so a stuck call can be given up on', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: '回覆' } }] }) })
+      const signal = AbortSignal.timeout(10_000)
+
+      await provider.chatCompletion([{ role: 'user', content: '你好' }], { signal })
+
+      expect(mockFetch.mock.calls[0][1].signal).toBe(signal)
+    })
+
     it('throws on API error', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,

@@ -102,8 +102,9 @@ export function createFakeDynamoDb() {
   const rows = new Map()
   const keyOf = (key) => `${key.pk.S}|${key.sk.S}`
   // Knobs a test can set: run something just before a transaction commits,
-  // split queries into pages, or have batch writes hand back unprocessed deletes.
-  const hooks = { beforeTransaction: async () => {}, queryPageSize: Infinity, unprocessedBatches: 0 }
+  // split queries into pages, have batch writes hand back unprocessed deletes,
+  // or throw from a single-item update before it applies.
+  const hooks = { beforeTransaction: async () => {}, queryPageSize: Infinity, unprocessedBatches: 0, beforeUpdate: () => {} }
 
   // Supports "SET a = :v" and "ADD a :n" clauses, one attribute each, in either order.
   function applyUpdate(input, row) {
@@ -131,6 +132,7 @@ export function createFakeDynamoDb() {
     },
     Get: (input) => ({ Item: rows.get(keyOf(input.Key)) }),
     Update: (input) => {
+      hooks.beforeUpdate(input)
       const row = rows.get(keyOf(input.Key))
       if (!checkCondition(input, row)) throw failed('ConditionalCheckFailedException')
       rows.set(keyOf(input.Key), applyUpdate(input, row))

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb'
 import { downloadContent, showLoadingIndicator } from '../line.mjs'
 import { transcribe } from './transcribe.mjs'
@@ -13,6 +14,10 @@ export const VOICE_MINUTES_PER_MONTH = parseInt(process.env.VOICE_MINUTES_PER_MO
 const MINUTES_FOR_EVERYONE = parseInt(process.env.VOICE_MINUTES_ALL_USERS_PER_MONTH || '1500', 10)
 const USER_LIMIT_SECONDS = VOICE_MINUTES_PER_MONTH * 60
 const EVERYONE_LIMIT_SECONDS = MINUTES_FOR_EVERYONE * 60
+// Measured in Tokyo, 3.5 minutes of audio transcribed in about 20 seconds, which
+// still leaves the model time to answer within LINE's one-minute reply token.
+// Longer messages are turned away before anything is paid for.
+const MAX_SECONDS_PER_MESSAGE = 180
 
 // LINE's reply token lasts one minute from the webhook, and the clock starts
 // when LINE sends it, not when this code runs: a cold start or an earlier
@@ -33,6 +38,9 @@ const LIMIT_REPLIES = {
     '這個月大家的語音額度已經用完了，下個月 1 號會恢復。' +
     '想用說的，可以點鍵盤上的麥克風，說完會變成文字傳給我',
 }
+const TOO_LONG_REPLY =
+  `這段語音有點長，我一次最多能聽 ${MAX_SECONDS_PER_MESSAGE / 60} 分鐘。` +
+  '可以分成短一點的幾段傳給我，或點鍵盤上的麥克風說給我聽嗎'
 const NOTHING_HEARD_REPLY = '這段語音我沒聽到說話的聲音，可以再說一次，或打字給我嗎'
 // Not "send it again": the pause lasts until the account is fixed.
 const PAUSED_REPLY = '語音這邊暫時沒辦法聽，可以先打字，或點鍵盤上的麥克風說給我聽嗎'
@@ -72,7 +80,12 @@ async function addIfRoom(Key, seconds, limitSeconds) {
   }
 }
 
-async function takeBack(Key, seconds) {
+// Logs name a user by a hash, never the LINE id itself.
+const hashed = (userId) => createHash('sha256').update(userId).digest('hex').slice(0, 12)
+
+// A give-back the SDK could not get through, after its own retries, raises the
+// failure alarm with what to add back by hand, so no minutes vanish unseen.
+async function takeBack(Key, seconds, whose) {
   await client
     .send(
       new UpdateItemCommand({
@@ -84,7 +97,7 @@ async function takeBack(Key, seconds) {
         ExpressionAttributeValues: { ':refund': { N: String(-seconds) } },
       })
     )
-    .catch((err) => console.warn(`Voice seconds not given back: ${err.name}`))
+    .catch((err) => console.error(`Handler error: voice seconds not given back: ${seconds} s for ${whose} (${err.name})`))
 }
 
 /**
@@ -95,23 +108,29 @@ async function takeBack(Key, seconds) {
 async function reserveSeconds(userId, sentAt, seconds) {
   const month = monthOf(sentAt)
   const mine = userCounter(userId, month)
+  const whose = `user ${hashed(userId)} in ${month}`
   if (!(await addIfRoom(mine, seconds, USER_LIMIT_SECONDS))) return 'user'
   let fits
   try {
     fits = await addIfRoom(everyoneCounter(month), seconds, EVERYONE_LIMIT_SECONDS)
   } catch (err) {
-    await takeBack(mine, seconds)
+    await takeBack(mine, seconds, whose)
     throw err
   }
   if (fits) return null
-  await takeBack(mine, seconds)
+  await takeBack(mine, seconds, whose)
   return 'everyone'
 }
 
-// A voice message the bot failed to hear or answer uses up nobody's minutes.
-async function giveBackSeconds(userId, sentAt, seconds) {
+// After a failure, the user gets back minutes they got no answer for.
+// Everyone's count keeps any minutes Amazon may already bill, once a job was
+// asked for, so failures cannot run the bill past the monthly total.
+async function giveBackSeconds(userId, sentAt, seconds, { billed, answered }) {
   const month = monthOf(sentAt)
-  await Promise.all([takeBack(userCounter(userId, month), seconds), takeBack(everyoneCounter(month), seconds)])
+  await Promise.all([
+    !answered && takeBack(userCounter(userId, month), seconds, `user ${hashed(userId)} in ${month}`),
+    !billed && takeBack(everyoneCounter(month), seconds, `all users in ${month}`),
+  ])
 }
 
 /**
@@ -129,6 +148,7 @@ export async function handleVoice(userId, replyToken, message, sentAt) {
   }
 
   const seconds = message.duration ? Math.ceil(message.duration / 1000) : 60
+  if (seconds > MAX_SECONDS_PER_MESSAGE) return replyAndRemember(userId, replyToken, REMEMBERED_AS, TOO_LONG_REPLY, sentAt)
 
   const stoppedBy = await reserveSeconds(userId, sentAt, seconds)
   if (stoppedBy === 'everyone') console.warn(`${EVERYONE_LIMIT_LOG}: ${MINUTES_FOR_EVERYONE} minutes in ${monthOf(sentAt)}`)
@@ -136,13 +156,15 @@ export async function handleVoice(userId, replyToken, message, sentAt) {
 
   showLoadingIndicator(userId, 60).catch((err) => console.warn(err.message))
 
+  const progress = { billed: false, answered: false }
   try {
     const deadline = sentAt + TRANSCRIBE_BUDGET_MS
-    const words = await transcribe(await downloadContent(message.id, deadline), { deadline })
+    const audio = await downloadContent(message.id, deadline)
+    const words = await transcribe(audio, { deadline, onJobStart: () => (progress.billed = true) })
     if (!words) return await replyAndRemember(userId, replyToken, REMEMBERED_AS, NOTHING_HEARD_REPLY, sentAt)
-    return await handleText(userId, replyToken, words, sentAt)
+    return await handleText(userId, replyToken, words, sentAt, { onReplied: () => (progress.answered = true) })
   } catch (err) {
-    await giveBackSeconds(userId, sentAt, seconds)
+    await giveBackSeconds(userId, sentAt, seconds, progress)
     throw err
   }
 }

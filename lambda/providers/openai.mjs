@@ -12,9 +12,10 @@ export class OpenAiProvider extends LlmProvider {
     this.#summaryModel = process.env.SUMMARY_MODEL_OPENAI || 'gpt-4.1-mini'
   }
 
-  async chatCompletion(messages) {
+  async chatCompletion(messages, { signal } = {}) {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
+      signal,
       headers: {
         Authorization: `Bearer ${this.#apiKey}`,
         'Content-Type': 'application/json; charset=utf-8',
