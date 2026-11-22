@@ -14,6 +14,9 @@ import * as path from 'path'
 import { Construct } from 'constructs'
 
 const KEY_REMINDER_DAYS_BEFORE = [7, 1]
+// Everyone's voice minutes together each month, so a crowd cannot run up the
+// Transcribe bill (about US$0.006 a minute). voice.mjs enforces it.
+const VOICE_MINUTES_ALL_USERS = process.env.VOICE_MINUTES_ALL_USERS_PER_MONTH || '1500'
 
 export class AnimittaStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -66,6 +69,7 @@ export class AnimittaStack extends cdk.Stack {
         RICH_MENU_ID: process.env.RICH_MENU_ID || '',
         VOICE_BUCKET_NAME: voiceBucket.bucketName,
         VOICE_MINUTES_PER_MONTH: process.env.VOICE_MINUTES_PER_MONTH || '30',
+        VOICE_MINUTES_ALL_USERS_PER_MONTH: VOICE_MINUTES_ALL_USERS,
       },
     })
 
@@ -101,6 +105,7 @@ export class AnimittaStack extends cdk.Stack {
     alertTopic.addSubscription(new subscriptions.EmailSubscription(alertEmail))
 
     this.addFailureAlarm(fn, alertTopic)
+    this.addVoiceLimitAlarm(fn, alertTopic)
     this.addKeyExpiryReminders(alertTopic, process.env.ANTHROPIC_KEY_EXPIRES_ON)
   }
 
@@ -130,6 +135,31 @@ export class AnimittaStack extends cdk.Stack {
       alarmDescription:
         '無相界有訊息沒處理完：可能沒回成功，也可能回了但記憶沒存好（AI 呼叫失敗、逾時或程式錯誤），或語音因為這個 AWS 帳號沒有 AI 服務 opt-out 而暫停（log 會寫 "voice paused"）。到 CloudWatch Logs /aws/lambda/animitta 搜尋 "Handler error" 或 "Task timed out" 看原因。',
       metric: failures,
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(new cloudwatchActions.SnsAction(topic))
+  }
+
+  // voice.mjs logs "Voice limit for all users reached" each time it turns a
+  // voice message away because everyone's minutes for the month are used up.
+  // Hourly, so a busy month sends a few emails rather than one per message.
+  private addVoiceLimitAlarm(fn: lambda.Function, topic: sns.ITopic) {
+    const turnedAway = new logs.MetricFilter(this, 'VoiceLimitFilter', {
+      logGroup: logs.LogGroup.fromLogGroupName(this, 'VoiceLimitLogs', `/aws/lambda/${fn.functionName}`),
+      filterPattern: logs.FilterPattern.anyTerm('Voice limit for all users reached'),
+      metricNamespace: 'Animitta',
+      metricName: 'VoiceLimitForAllUsersReached',
+      metricValue: '1',
+    }).metric({ statistic: 'Sum', period: cdk.Duration.hours(1) })
+
+    new cloudwatch.Alarm(this, 'VoiceLimitAlarm', {
+      alarmName: 'animitta-voice-limit-reached',
+      alarmDescription:
+        `無相界這個月全體使用者的語音分鐘數（${VOICE_MINUTES_ALL_USERS} 分鐘）用完了：語音會暫停到下個月 1 號（台北時間），打字聊天照常。` +
+        '要提高上限，改 VOICE_MINUTES_ALL_USERS_PER_MONTH 再部署。',
+      metric: turnedAway,
       threshold: 1,
       evaluationPeriods: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,

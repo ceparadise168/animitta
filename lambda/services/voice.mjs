@@ -8,7 +8,11 @@ const client = new DynamoDBClient()
 const TABLE = process.env.MEMORY_TABLE_NAME
 
 export const VOICE_MINUTES_PER_MONTH = parseInt(process.env.VOICE_MINUTES_PER_MONTH || '30', 10)
-const LIMIT_SECONDS = VOICE_MINUTES_PER_MONTH * 60
+// Everyone's voice minutes together, so a crowd of users cannot run up the
+// Transcribe bill. At about US$0.006 a minute, 1,500 minutes is about US$9.
+const MINUTES_FOR_EVERYONE = parseInt(process.env.VOICE_MINUTES_ALL_USERS_PER_MONTH || '1500', 10)
+const USER_LIMIT_SECONDS = VOICE_MINUTES_PER_MONTH * 60
+const EVERYONE_LIMIT_SECONDS = MINUTES_FOR_EVERYONE * 60
 
 // LINE's reply token lasts one minute from the webhook, and the clock starts
 // when LINE sends it, not when this code runs: a cold start or an earlier
@@ -21,36 +25,43 @@ const TRANSCRIBE_BUDGET_MS = 40_000
 const COUNTER_DAYS = 40
 
 const REMEMBERED_AS = '（傳了一段語音）'
-const OVER_LIMIT_REPLY =
-  `這段語音超過這個月剩下的語音額度了（每個月 ${VOICE_MINUTES_PER_MONTH} 分鐘），我沒辦法聽。` +
-  '想用說的，可以點鍵盤上的麥克風，說完會變成文字傳給我'
+const LIMIT_REPLIES = {
+  user:
+    `這段語音超過這個月剩下的語音額度了（每個月 ${VOICE_MINUTES_PER_MONTH} 分鐘），我沒辦法聽。` +
+    '想用說的，可以點鍵盤上的麥克風，說完會變成文字傳給我',
+  everyone:
+    '這個月大家的語音額度已經用完了，下個月 1 號會恢復。' +
+    '想用說的，可以點鍵盤上的麥克風，說完會變成文字傳給我',
+}
 const NOTHING_HEARD_REPLY = '這段語音我沒聽到說話的聲音，可以再說一次，或打字給我嗎'
 // Not "send it again": the pause lasts until the account is fixed.
 const PAUSED_REPLY = '語音這邊暫時沒辦法聽，可以先打字，或點鍵盤上的麥克風說給我聽嗎'
+// The stack's voice-limit alarm counts this line.
+const EVERYONE_LIMIT_LOG = 'Voice limit for all users reached'
 
 // Months follow Taipei time, where the users are.
 const monthOf = (sentAt) => new Date(sentAt + 8 * 3600_000).toISOString().slice(0, 7)
 
-function counterKey(userId, sentAt) {
-  return { pk: { S: `USER#${userId}` }, sk: { S: `VOICE#${monthOf(sentAt)}` } }
-}
+// Two counters a month: one for each user, one for everyone together.
+const userCounter = (userId, month) => ({ pk: { S: `USER#${userId}` }, sk: { S: `VOICE#${month}` } })
+const everyoneCounter = (month) => ({ pk: { S: 'ALL_USERS' }, sk: { S: `VOICE#${month}` } })
 
-// Counts the seconds against this month only if they still fit, in one
-// conditional write, so two messages at once cannot both slip past the limit.
-async function reserveSeconds(userId, sentAt, seconds) {
-  if (seconds > LIMIT_SECONDS) return false
+// Adds the seconds to one counter only if they still fit under its limit, in
+// one conditional write, so two messages at once cannot both slip past it.
+async function addIfRoom(Key, seconds, limitSeconds) {
+  if (seconds > limitSeconds) return false
   try {
     await client.send(
       new UpdateItemCommand({
         TableName: TABLE,
-        Key: counterKey(userId, sentAt),
+        Key,
         UpdateExpression: 'SET #ttl = :ttl ADD #used :seconds',
         ConditionExpression: 'attribute_not_exists(#used) OR #used < :room',
         ExpressionAttributeNames: { '#ttl': 'ttl', '#used': 'usedSeconds' },
         ExpressionAttributeValues: {
           ':ttl': { N: String(Math.floor(Date.now() / 1000) + COUNTER_DAYS * 86400) },
           ':seconds': { N: String(seconds) },
-          ':room': { N: String(LIMIT_SECONDS - seconds + 1) },
+          ':room': { N: String(limitSeconds - seconds + 1) },
         },
       })
     )
@@ -61,13 +72,12 @@ async function reserveSeconds(userId, sentAt, seconds) {
   }
 }
 
-// A voice message the bot failed to hear or answer does not use up the user's minutes.
-async function giveBackSeconds(userId, sentAt, seconds) {
+async function takeBack(Key, seconds) {
   await client
     .send(
       new UpdateItemCommand({
         TableName: TABLE,
-        Key: counterKey(userId, sentAt),
+        Key,
         UpdateExpression: 'ADD #used :refund',
         ConditionExpression: 'attribute_exists(#used)',
         ExpressionAttributeNames: { '#used': 'usedSeconds' },
@@ -75,6 +85,33 @@ async function giveBackSeconds(userId, sentAt, seconds) {
       })
     )
     .catch((err) => console.warn(`Voice seconds not given back: ${err.name}`))
+}
+
+/**
+ * Count a voice message against the user's minutes and everyone's minutes for
+ * the month. Resolves to null when both had room, or to the limit that
+ * stopped it ('user' or 'everyone'), in which case nothing stays counted.
+ */
+async function reserveSeconds(userId, sentAt, seconds) {
+  const month = monthOf(sentAt)
+  const mine = userCounter(userId, month)
+  if (!(await addIfRoom(mine, seconds, USER_LIMIT_SECONDS))) return 'user'
+  let fits
+  try {
+    fits = await addIfRoom(everyoneCounter(month), seconds, EVERYONE_LIMIT_SECONDS)
+  } catch (err) {
+    await takeBack(mine, seconds)
+    throw err
+  }
+  if (fits) return null
+  await takeBack(mine, seconds)
+  return 'everyone'
+}
+
+// A voice message the bot failed to hear or answer uses up nobody's minutes.
+async function giveBackSeconds(userId, sentAt, seconds) {
+  const month = monthOf(sentAt)
+  await Promise.all([takeBack(userCounter(userId, month), seconds), takeBack(everyoneCounter(month), seconds)])
 }
 
 /**
@@ -93,9 +130,9 @@ export async function handleVoice(userId, replyToken, message, sentAt) {
 
   const seconds = message.duration ? Math.ceil(message.duration / 1000) : 60
 
-  if (!(await reserveSeconds(userId, sentAt, seconds))) {
-    return replyAndRemember(userId, replyToken, REMEMBERED_AS, OVER_LIMIT_REPLY, sentAt)
-  }
+  const stoppedBy = await reserveSeconds(userId, sentAt, seconds)
+  if (stoppedBy === 'everyone') console.warn(`${EVERYONE_LIMIT_LOG}: ${MINUTES_FOR_EVERYONE} minutes in ${monthOf(sentAt)}`)
+  if (stoppedBy) return replyAndRemember(userId, replyToken, REMEMBERED_AS, LIMIT_REPLIES[stoppedBy], sentAt)
 
   showLoadingIndicator(userId, 60).catch((err) => console.warn(err.message))
 

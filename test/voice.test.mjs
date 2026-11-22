@@ -11,6 +11,7 @@ process.env.LLM_PROVIDER = 'anthropic'
 process.env.ANTHROPIC_API_KEY = 'test-key'
 process.env.VOICE_BUCKET_NAME = 'voice-bucket'
 process.env.VOICE_MINUTES_PER_MONTH = '30'
+process.env.VOICE_MINUTES_ALL_USERS_PER_MONTH = '1500'
 
 const fake = createFakeDynamoDb()
 jest.unstable_mockModule('@aws-sdk/client-dynamodb', () => fake.module)
@@ -119,20 +120,24 @@ const PK = `USER#${USER}`
 // message sent "now" has its full minute to be answered.
 const NOV = Date.parse('2026-11-23T02:00:00Z')
 let replyTokens = 0
-function sendVoice({ seconds = 12, at = Date.now(), provider = 'line' } = {}) {
+function sendVoice({ seconds = 12, at = Date.now(), provider = 'line', user = USER } = {}) {
   const message = { type: 'audio', id: `m-${++replyTokens}`, duration: seconds * 1000, contentProvider: { type: provider } }
-  const body = JSON.stringify({ events: [{ type: 'message', replyToken: `rt-${replyTokens}`, timestamp: at, source: { type: 'user', userId: USER }, message }] })
+  const body = JSON.stringify({ events: [{ type: 'message', replyToken: `rt-${replyTokens}`, timestamp: at, source: { type: 'user', userId: user }, message }] })
   const signature = createHmac('SHA256', 'test-secret').update(body).digest('base64')
   return handler({ body, headers: { 'x-line-signature': signature } })
 }
-const usedSeconds = (month) => Number(rows.get(`${PK}|VOICE#${month}`)?.usedSeconds.N ?? 0)
-function setUsed(month, seconds) {
-  rows.set(`${PK}|VOICE#${month}`, { pk: { S: PK }, sk: { S: `VOICE#${month}` }, usedSeconds: { N: String(seconds) } })
+const counted = (pk, month) => Number(rows.get(`${pk}|VOICE#${month}`)?.usedSeconds.N ?? 0)
+const usedSeconds = (month, user = USER) => counted(`USER#${user}`, month)
+const everyoneSeconds = (month) => counted('ALL_USERS', month)
+function setCounter(pk, month, seconds) {
+  rows.set(`${pk}|VOICE#${month}`, { pk: { S: pk }, sk: { S: `VOICE#${month}` }, usedSeconds: { N: String(seconds) } })
 }
+const setUsed = (month, seconds) => setCounter(PK, month, seconds)
+const setEveryone = (month, seconds) => setCounter('ALL_USERS', month, seconds)
 const userTurns = () => [...rows.values()].filter((r) => r.sk.S.startsWith('TURN#') && r.role.S === 'user').map((r) => r.content.S)
 
 describe('voice messages', () => {
-  let errorLog
+  let errorLog, warnLog
   beforeEach(() => {
     rows.clear()
     objects.clear()
@@ -145,7 +150,7 @@ describe('voice messages', () => {
     line.notReadyFor = 0
     Object.assign(account, { optOut: optedOutForAll, error: null })
     errorLog = jest.spyOn(console, 'error').mockImplementation(() => {})
-    jest.spyOn(console, 'warn').mockImplementation(() => {})
+    warnLog = jest.spyOn(console, 'warn').mockImplementation(() => {})
     jest.useFakeTimers({ now: NOV, advanceTimers: true })
   })
   afterEach(() => {
@@ -160,6 +165,7 @@ describe('voice messages', () => {
     expect(lineReplies).toEqual(['（模型的回覆）'])
     expect(userTurns()).toEqual(['最近工作壓力很大，晚上睡不著'])
     expect(usedSeconds('2026-11')).toBe(12)
+    expect(everyoneSeconds('2026-11')).toBe(12)
   })
 
   it('keeps the typing animation up for the longest LINE allows while it listens', async () => {
@@ -183,6 +189,7 @@ describe('voice messages', () => {
     await sendVoice({ seconds: 1 })
 
     expect(usedSeconds('2026-11')).toBe(30 * 60)
+    expect(everyoneSeconds('2026-11')).toBe(10)
     expect(lineReplies[1]).toContain('超過這個月剩下的語音額度了（每個月 30 分鐘）')
     expect(lineReplies[1]).toContain('鍵盤上的麥克風')
     expect(chatRequests).toHaveLength(1)
@@ -194,6 +201,41 @@ describe('voice messages', () => {
 
     expect(lineReplies[0]).toContain('超過這個月剩下的語音額度')
     expect(usedSeconds('2026-11')).toBe(0)
+  })
+
+  it('stops everyone at the monthly total for all users, says when voice comes back, and raises the alarm', async () => {
+    setEveryone('2026-11', 1500 * 60 - 10)
+
+    await sendVoice({ seconds: 10, user: 'U-first' })
+    await sendVoice({ seconds: 1, user: 'U-second' })
+
+    expect(chatRequests).toHaveLength(1)
+    expect(everyoneSeconds('2026-11')).toBe(1500 * 60)
+    expect(usedSeconds('2026-11', 'U-second')).toBe(0)
+    expect(lineReplies[1]).toContain('這個月大家的語音額度已經用完了，下個月 1 號會恢復')
+    expect(lineReplies[1]).toContain('鍵盤上的麥克風')
+    expect(startedJobs).toHaveLength(1)
+    expect(warnLog.mock.calls.map((call) => call[0])).toContain('Voice limit for all users reached: 1500 minutes in 2026-11')
+  })
+
+  it('lets only one of two users take the last of everyone\'s minutes when they send at the same moment', async () => {
+    setEveryone('2026-11', 1500 * 60 - 10)
+
+    await Promise.all([sendVoice({ seconds: 10, user: 'U-first' }), sendVoice({ seconds: 10, user: 'U-second' })])
+
+    expect(everyoneSeconds('2026-11')).toBe(1500 * 60)
+    expect(usedSeconds('2026-11', 'U-first') + usedSeconds('2026-11', 'U-second')).toBe(10)
+    expect(chatRequests).toHaveLength(1)
+  })
+
+  it('starts everyone\'s total afresh each Taipei month', async () => {
+    setEveryone('2026-11', 1500 * 60)
+
+    jest.setSystemTime(Date.parse('2026-11-30T16:30:00Z'))
+    await sendVoice({ seconds: 12 })
+
+    expect(chatRequests).toHaveLength(1)
+    expect(everyoneSeconds('2026-12')).toBe(12)
   })
 
   it('lets only one of two messages that arrive together take the last minutes', async () => {
@@ -222,6 +264,7 @@ describe('voice messages', () => {
     await sendVoice({ seconds: 12 })
 
     expect(usedSeconds('2026-11')).toBe(0)
+    expect(everyoneSeconds('2026-11')).toBe(0)
     expect(lineReplies[0]).toContain('卡住')
     expect(errorLog.mock.calls[0][0]).toBe('Handler error:')
     expect(objects.size).toBe(0)
