@@ -1,0 +1,240 @@
+// Drives the real handler, voice, chat and memory code against an in-memory
+// DynamoDB, S3 and Transcribe, and checks what the user hears back, what the
+// model is sent, what the monthly counter says and that no recording is left.
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals'
+import { createHmac } from 'node:crypto'
+import { createFakeDynamoDb } from './support/fake-dynamodb.mjs'
+
+process.env.LINE_CHANNEL_SECRET = 'test-secret'
+process.env.MEMORY_TABLE_NAME = 'test-table'
+process.env.LLM_PROVIDER = 'anthropic'
+process.env.ANTHROPIC_API_KEY = 'test-key'
+process.env.VOICE_BUCKET_NAME = 'voice-bucket'
+process.env.VOICE_MINUTES_PER_MONTH = '30'
+
+const fake = createFakeDynamoDb()
+jest.unstable_mockModule('@aws-sdk/client-dynamodb', () => fake.module)
+const { rows } = fake
+
+// S3: objects by key.
+const objects = new Map()
+const s3Command = (type) => class { constructor(input) { this.type = type; this.input = input } }
+jest.unstable_mockModule('@aws-sdk/client-s3', () => ({
+  S3Client: class {
+    async send({ type, input }) {
+      if (input.Bucket !== 'voice-bucket') throw new Error(`unexpected bucket ${input.Bucket}`)
+      if (type === 'Put') objects.set(input.Key, input.Body)
+      if (type === 'Get') {
+        if (!objects.has(input.Key)) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' })
+        return { Body: { transformToString: async () => String(objects.get(input.Key)) } }
+      }
+      if (type === 'DeleteMany') for (const { Key } of input.Delete.Objects) objects.delete(Key)
+      return {}
+    }
+  },
+  PutObjectCommand: s3Command('Put'),
+  GetObjectCommand: s3Command('Get'),
+  DeleteObjectsCommand: s3Command('DeleteMany'),
+}))
+
+// Transcribe: a job finishes on its second status check, with what `speech` says.
+const jobs = new Map()
+const startedJobs = []
+const speech = { transcript: '最近工作壓力很大，晚上睡不著', fails: false, neverFinishes: false }
+jest.unstable_mockModule('@aws-sdk/client-transcribe', () => ({
+  TranscribeClient: class {
+    async send({ type, input }) {
+      if (type === 'Start') {
+        const audioKey = input.Media.MediaFileUri.replace('s3://voice-bucket/', '')
+        if (!objects.has(audioKey)) throw new Error('recording missing from S3')
+        startedJobs.push(input)
+        jobs.set(input.TranscriptionJobName, { input, checks: 0 })
+        return {}
+      }
+      const job = jobs.get(input.TranscriptionJobName)
+      if (type === 'Delete') return jobs.delete(input.TranscriptionJobName), {}
+      job.checks++
+      if (speech.neverFinishes || job.checks < 2) return { TranscriptionJob: { TranscriptionJobStatus: 'IN_PROGRESS' } }
+      if (speech.fails) return { TranscriptionJob: { TranscriptionJobStatus: 'FAILED', FailureReason: 'bad audio' } }
+      objects.set(job.input.OutputKey, JSON.stringify({ results: { transcripts: [{ transcript: speech.transcript }] } }))
+      return { TranscriptionJob: { TranscriptionJobStatus: 'COMPLETED' } }
+    }
+  },
+  StartTranscriptionJobCommand: s3Command('Start'),
+  GetTranscriptionJobCommand: s3Command('Get'),
+  DeleteTranscriptionJobCommand: s3Command('Delete'),
+}))
+
+const chatRequests = []
+const lineReplies = []
+const loadingCalls = []
+const line = { notReadyFor: 0 }
+global.fetch = async (url, init = {}) => {
+  const ok = (body) => ({ ok: true, status: 200, json: async () => body })
+  url = String(url)
+  if (url.endsWith('/v2/bot/message/reply')) {
+    lineReplies.push(JSON.parse(init.body).messages[0].text)
+    return ok({})
+  }
+  if (url.endsWith('/v2/bot/chat/loading/start')) {
+    loadingCalls.push(JSON.parse(init.body))
+    return ok({})
+  }
+  if (url.startsWith('https://api-data.line.me/v2/bot/message/')) {
+    if (line.notReadyFor > 0) return line.notReadyFor--, { ok: true, status: 202 }
+    return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode('m4a bytes').buffer }
+  }
+  if (url.startsWith('https://api.line.me/')) return ok({})
+  const body = JSON.parse(init.body)
+  if (body.system) chatRequests.push(body)
+  return ok({ stop_reason: 'end_turn', content: [{ type: 'text', text: '（模型的回覆）' }] })
+}
+
+const { handler } = await import('../lambda/index.mjs')
+const { transcribe } = await import('../lambda/services/transcribe.mjs')
+
+const USER = 'U-voice'
+const PK = `USER#${USER}`
+// 2026-11-23 10:00 in Taipei.
+const NOV = Date.parse('2026-11-23T02:00:00Z')
+let replyTokens = 0
+function sendVoice({ seconds = 12, at = NOV, provider = 'line' } = {}) {
+  const message = { type: 'audio', id: `m-${++replyTokens}`, duration: seconds * 1000, contentProvider: { type: provider } }
+  const body = JSON.stringify({ events: [{ type: 'message', replyToken: `rt-${replyTokens}`, timestamp: at, source: { type: 'user', userId: USER }, message }] })
+  const signature = createHmac('SHA256', 'test-secret').update(body).digest('base64')
+  return handler({ body, headers: { 'x-line-signature': signature } })
+}
+const usedSeconds = (month) => Number(rows.get(`${PK}|VOICE#${month}`)?.usedSeconds.N ?? 0)
+function setUsed(month, seconds) {
+  rows.set(`${PK}|VOICE#${month}`, { pk: { S: PK }, sk: { S: `VOICE#${month}` }, usedSeconds: { N: String(seconds) } })
+}
+const userTurns = () => [...rows.values()].filter((r) => r.sk.S.startsWith('TURN#') && r.role.S === 'user').map((r) => r.content.S)
+
+describe('voice messages', () => {
+  let errorLog
+  beforeEach(() => {
+    rows.clear()
+    objects.clear()
+    jobs.clear()
+    startedJobs.length = 0
+    chatRequests.length = 0
+    lineReplies.length = 0
+    loadingCalls.length = 0
+    Object.assign(speech, { transcript: '最近工作壓力很大，晚上睡不著', fails: false, neverFinishes: false })
+    line.notReadyFor = 0
+    errorLog = jest.spyOn(console, 'error').mockImplementation(() => {})
+    jest.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+  afterEach(() => jest.restoreAllMocks())
+
+  it('answers a voice message as if the user had typed what they said', async () => {
+    await sendVoice({ seconds: 12 })
+
+    expect(chatRequests[0].messages.at(-1)).toEqual({ role: 'user', content: '最近工作壓力很大，晚上睡不著' })
+    expect(lineReplies).toEqual(['（模型的回覆）'])
+    expect(userTurns()).toEqual(['最近工作壓力很大，晚上睡不著'])
+    expect(usedSeconds('2026-11')).toBe(12)
+  })
+
+  it('keeps the typing animation up for the longest LINE allows while it listens', async () => {
+    await sendVoice()
+
+    expect(loadingCalls[0]).toEqual({ chatId: USER, loadingSeconds: 60 })
+  })
+
+  it('transcribes as Taiwanese Mandarin and leaves neither the recording nor the transcript in S3, nor the job in Transcribe', async () => {
+    await sendVoice()
+
+    expect(startedJobs.map((job) => job.LanguageCode)).toEqual(['zh-TW'])
+    expect(objects.size).toBe(0)
+    expect(jobs.size).toBe(0)
+  })
+
+  it('stops at the monthly minutes, without transcribing, and points to the keyboard microphone', async () => {
+    setUsed('2026-11', 30 * 60 - 10)
+
+    await sendVoice({ seconds: 10 })
+    await sendVoice({ seconds: 1 })
+
+    expect(usedSeconds('2026-11')).toBe(30 * 60)
+    expect(lineReplies[1]).toContain('30 分鐘用完了')
+    expect(lineReplies[1]).toContain('鍵盤上的麥克風')
+    expect(chatRequests).toHaveLength(1)
+    expect(userTurns()).toEqual(['最近工作壓力很大，晚上睡不著', '（傳了一段語音）'])
+  })
+
+  it('refuses a single recording longer than the whole month allows', async () => {
+    await sendVoice({ seconds: 31 * 60 })
+
+    expect(lineReplies[0]).toContain('用完了')
+    expect(usedSeconds('2026-11')).toBe(0)
+  })
+
+  it('lets only one of two messages that arrive together take the last minutes', async () => {
+    setUsed('2026-11', 30 * 60 - 10)
+
+    await Promise.all([sendVoice({ seconds: 10 }), sendVoice({ seconds: 10 })])
+
+    expect(usedSeconds('2026-11')).toBe(30 * 60)
+    expect(chatRequests).toHaveLength(1)
+  })
+
+  it('starts each month afresh on Taipei time', async () => {
+    setUsed('2026-11', 30 * 60)
+
+    // 2026-12-01 00:30 in Taipei, still November in UTC.
+    await sendVoice({ seconds: 12, at: Date.parse('2026-11-30T16:30:00Z') })
+
+    expect(chatRequests).toHaveLength(1)
+    expect(usedSeconds('2026-12')).toBe(12)
+  })
+
+  it('gives the minutes back, apologises and raises the alarm when transcription fails, leaving nothing behind', async () => {
+    speech.fails = true
+
+    await sendVoice({ seconds: 12 })
+
+    expect(usedSeconds('2026-11')).toBe(0)
+    expect(lineReplies[0]).toContain('卡住')
+    expect(errorLog.mock.calls[0][0]).toBe('Handler error:')
+    expect(objects.size).toBe(0)
+    expect(jobs.size).toBe(0)
+  })
+
+  it('says it heard nothing when the recording has no speech, without asking the model', async () => {
+    speech.transcript = '  '
+
+    await sendVoice()
+
+    expect(chatRequests).toHaveLength(0)
+    expect(lineReplies[0]).toContain('沒聽到說話的聲音')
+    expect(userTurns()).toEqual(['（傳了一段語音）'])
+  })
+
+  it('waits while LINE is still preparing a large recording', async () => {
+    line.notReadyFor = 2
+
+    await sendVoice()
+
+    expect(lineReplies).toEqual(['（模型的回覆）'])
+  })
+})
+
+describe('transcribe', () => {
+  beforeEach(() => {
+    objects.clear()
+    jobs.clear()
+    Object.assign(speech, { transcript: '你好', fails: false, neverFinishes: false })
+    jest.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+  afterEach(() => jest.restoreAllMocks())
+
+  it('gives up at the deadline and still deletes the recording', async () => {
+    speech.neverFinishes = true
+
+    await expect(transcribe(Buffer.from('m4a'), { deadline: Date.now() + 30, pollMs: 10 })).rejects.toThrow('deadline')
+
+    expect(objects.size).toBe(0)
+    expect(jobs.size).toBe(0)
+  })
+})

@@ -36,7 +36,8 @@ LINE App → Lambda Function URL → Lambda (Node.js 22.x) → OpenAI / Anthropi
 - Rich Menu with 3 buttons: 隨意聊聊 (casual chat), 清除記憶 (clear memory), 關於 (about)
 - Typing indicator while the LLM writes the reply
 - Stickers are answered: LINE's sticker keywords (and the text on message stickers) go to the model
-- Voice, photos, videos, files and locations get a short "I can only read text" reply, which is remembered
+- Voice messages are transcribed by Amazon Transcribe (`zh-TW`) and answered like typed text. The recording and transcript sit in a private S3 bucket only while the job runs, are deleted right after, and the bucket empties itself after a day. Each user gets `VOICE_MINUTES_PER_MONTH` (30) minutes a month, on Taipei time; a failed transcription gives the minutes back. Expect about 10–25 seconds before the reply, with the typing animation up meanwhile
+- Photos, videos, files and locations get a short "type or send voice instead" reply, which is remembered
 - Conversation memory: the last turns, plus an LLM-compressed summary for long-term context. After `SESSION_IDLE_HOURS` of silence a new session starts and the previous one comes back as background
 - Retention: everything remembered about someone is gone `CONVERSATION_TTL_DAYS` (90) days after their last message. Each turn expires that long after it was said, the summary that long after the latest exchange. 關於 quotes the number
 - Alerts: failed replies email `ALERT_EMAIL`; reminders go out before `ANTHROPIC_KEY_EXPIRES_ON`

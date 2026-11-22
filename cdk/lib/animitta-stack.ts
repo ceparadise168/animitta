@@ -1,6 +1,8 @@
 import * as cdk from 'aws-cdk-lib'
 import * as lambda from 'aws-cdk-lib/aws-lambda'
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb'
+import * as s3 from 'aws-cdk-lib/aws-s3'
+import * as iam from 'aws-cdk-lib/aws-iam'
 import * as sns from 'aws-cdk-lib/aws-sns'
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions'
 import * as logs from 'aws-cdk-lib/aws-logs'
@@ -26,13 +28,25 @@ export class AnimittaStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     })
 
+    // Voice messages and their transcripts wait here only while a job runs;
+    // the code deletes them right after, and anything a failed delete leaves
+    // behind is gone within a day.
+    const voiceBucket = new s3.Bucket(this, 'VoiceBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      lifecycleRules: [{ expiration: cdk.Duration.days(1) }],
+    })
+
     const fn = new lambda.Function(this, 'AnimittaHandler', {
       functionName: 'animitta',
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: 'index.handler',
       code: lambda.Code.fromAsset(path.resolve(__dirname, '../../lambda')),
       memorySize: 256,
-      timeout: cdk.Duration.seconds(30),
+      // A voice message takes about 10 to 25 seconds to transcribe before the
+      // model answers; LINE's reply token itself lasts one minute.
+      timeout: cdk.Duration.seconds(60),
       environment: {
         LLM_PROVIDER: process.env.LLM_PROVIDER || 'openai',
         OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
@@ -49,10 +63,24 @@ export class AnimittaStack extends cdk.Stack {
         CONVERSATION_TTL_DAYS: process.env.CONVERSATION_TTL_DAYS || '90',
         SESSION_IDLE_HOURS: process.env.SESSION_IDLE_HOURS || '2',
         RICH_MENU_ID: process.env.RICH_MENU_ID || '',
+        VOICE_BUCKET_NAME: voiceBucket.bucketName,
+        VOICE_MINUTES_PER_MONTH: process.env.VOICE_MINUTES_PER_MONTH || '30',
       },
     })
 
     table.grantReadWriteData(fn)
+    // Transcribe reads the recording and writes the transcript with the
+    // caller's own permissions, so the function needs both on the bucket.
+    voiceBucket.grantReadWrite(fn)
+    // IAM cannot narrow StartTranscriptionJob to a job name; the other two
+    // stay limited to the jobs this function names.
+    fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['transcribe:StartTranscriptionJob'], resources: ['*'] }))
+    fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['transcribe:GetTranscriptionJob', 'transcribe:DeleteTranscriptionJob'],
+        resources: [`arn:aws:transcribe:${this.region}:${this.account}:transcription-job/animitta-*`],
+      })
+    )
 
     const fnUrl = fn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,

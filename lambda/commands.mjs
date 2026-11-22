@@ -1,6 +1,7 @@
 import { replyMessage, replyWithQuickReply } from './line.mjs'
 import { clearMemory, RETENTION_DAYS } from './services/memory.mjs'
 import { replyAndRemember } from './services/chat.mjs'
+import { VOICE_MINUTES_PER_MONTH } from './services/voice.mjs'
 
 const CASUAL_CHAT_STARTERS = [
   '嗨，這邊很隨意，不用拘束\n\n想講最近煩你的事、一個轉不掉的念頭，或想問我金剛經裡的哪句話，都可以。不用先想好怎麼說，現在心裡最放不下的那件事，直接講出來就好',
@@ -20,6 +21,7 @@ const ABOUT_MESSAGE =
   '它會記得你最近跟它聊過的，下次才接得上；比較早的會整理成一段重點。這些記憶只用來讓它接得上話，不會拿去做別的事。\n\n' +
   `想馬上清空，按選單的「清除記憶」就好；${RETENTION_DAYS} 天沒來聊天，也會全部自動刪掉。\n\n` +
   `訊息在傳送和存放時都有加密，不過要產生回覆，你傳的文字還是會交給 AI 服務（${AI_SERVICE}）處理。\n\n` +
+  `傳語音的話，會先交給 Amazon 的語音辨識轉成文字，轉好就把錄音刪掉；每個月最多可以傳 ${VOICE_MINUTES_PER_MONTH} 分鐘。\n\n` +
   '目前由我個人自費維護。如果你覺得有幫助，歡迎分享給朋友；若想將這份善意延續下去，也歡迎隨喜捐款給你支持的慈善團體。\n\n' +
   '有任何建議，都歡迎寫信給我：erictu.engineer@gmail.com'
 

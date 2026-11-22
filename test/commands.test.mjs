@@ -20,6 +20,8 @@ jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({
   replyAndRemember: mockReplyAndRemember,
 }))
 
+jest.unstable_mockModule('../lambda/services/voice.mjs', () => ({ VOICE_MINUTES_PER_MONTH: 25 }))
+
 const { handleCommand, isCommand } = await import('../lambda/commands.mjs')
 
 describe('commands', () => {
@@ -72,6 +74,14 @@ describe('commands', () => {
     const text = mockReplyMessage.mock.calls[0][1]
     expect(text).toContain('只用來讓它接得上話，不會拿去做別的事')
     expect(text).toContain('都有加密，不過要產生回覆，你傳的文字還是會交給 AI 服務')
+  })
+
+  it('tells users where a voice message goes, that the recording is deleted, and the monthly limit the voice service enforces', async () => {
+    await handleCommand('user1', 'token1', '@關於')
+
+    const text = mockReplyMessage.mock.calls[0][1]
+    expect(text).toContain('會先交給 Amazon 的語音辨識轉成文字，轉好就把錄音刪掉')
+    expect(text).toContain('每個月最多可以傳 25 分鐘')
   })
 
 

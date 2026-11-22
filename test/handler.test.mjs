@@ -9,6 +9,9 @@ jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({
   replyAndRemember: mockReplyAndRemember,
 }))
 
+const mockHandleVoice = jest.fn()
+jest.unstable_mockModule('../lambda/services/voice.mjs', () => ({ handleVoice: mockHandleVoice }))
+
 const mockVerifySignature = jest.fn()
 const mockReplyMessage = jest.fn()
 jest.unstable_mockModule('../lambda/line.mjs', () => ({
@@ -65,22 +68,28 @@ describe('Lambda handler', () => {
     expect(mockHandleText).toHaveBeenCalledWith('u1', 'tok', '你好', SENT_AT)
   })
 
-  it('asks the user to type instead when a voice message arrives', async () => {
+  it('hands a voice message recorded in LINE to the voice service', async () => {
+    const message = { type: 'audio', id: 'audio123', duration: 12000, contentProvider: { type: 'line' } }
     const body = {
-      events: [
-        {
-          type: 'message',
-          replyToken: 'tok',
-          timestamp: SENT_AT, source: { type: 'user', userId: 'u1' },
-          message: { type: 'audio', id: 'audio123' },
-        },
-      ],
+      events: [{ type: 'message', replyToken: 'tok', timestamp: SENT_AT, source: { type: 'user', userId: 'u1' }, message }],
     }
 
     await handler(makeEvent(body))
 
+    expect(mockHandleVoice).toHaveBeenCalledWith('u1', 'tok', message, SENT_AT)
+    expect(mockReplyAndRemember).not.toHaveBeenCalled()
+  })
+
+  it('asks for text or a recording when audio hosted elsewhere arrives, which LINE cannot hand over', async () => {
+    const message = { type: 'audio', id: 'audio123', contentProvider: { type: 'external', originalContentUrl: 'https://example.com/a.m4a' } }
+    const body = {
+      events: [{ type: 'message', replyToken: 'tok', timestamp: SENT_AT, source: { type: 'user', userId: 'u1' }, message }],
+    }
+
+    await handler(makeEvent(body))
+
+    expect(mockHandleVoice).not.toHaveBeenCalled()
     expect(mockReplyAndRemember).toHaveBeenCalledWith('u1', 'tok', '（傳了一段語音）', expect.stringContaining('打字'), SENT_AT)
-    expect(mockHandleText).not.toHaveBeenCalled()
   })
 
   it('asks for text when a photo arrives, and remembers that a photo came', async () => {

@@ -1,5 +1,6 @@
 import { verifySignature, replyMessage, linkRichMenu } from './line.mjs'
 import { handleText, replyAndRemember } from './services/chat.mjs'
+import { handleVoice } from './services/voice.mjs'
 import { handleCommand, handlePostback, isCommand } from './commands.mjs'
 
 const WELCOME_MESSAGE =
@@ -9,7 +10,7 @@ const WELCOME_MESSAGE =
   '我會記得我們聊過的，下次才接得上。想讓我全部忘掉的話，按底下選單的「清除記憶」就好 😊'
 
 const FALLBACK_REPLY = '我這邊暫時卡住了，沒辦法好好回你。過一下再傳一次給我好嗎'
-const TEXT_ONLY_REPLY = '目前我只能讀文字，可以打字跟我說嗎'
+const TEXT_ONLY_REPLY = '這個我還看不懂，可以打字或傳語音跟我說嗎'
 
 // What the bot remembers the user sending when it cannot read the message.
 const UNREADABLE_MESSAGES = {
@@ -69,6 +70,10 @@ async function handleEvent(lineEvent) {
         await handleText(userId, replyToken, msg.text, sentAt)
       } else if (msg.type === 'sticker') {
         await handleText(userId, replyToken, stickerAsText(msg), sentAt)
+      } else if (msg.type === 'audio' && msg.contentProvider?.type !== 'external') {
+        // Audio hosted elsewhere comes as a link LINE cannot hand over, so only
+        // recordings sent in LINE are heard.
+        await handleVoice(userId, replyToken, msg, sentAt)
       } else if (UNREADABLE_MESSAGES[msg.type]) {
         await replyAndRemember(userId, replyToken, UNREADABLE_MESSAGES[msg.type], TEXT_ONLY_REPLY, sentAt)
       }

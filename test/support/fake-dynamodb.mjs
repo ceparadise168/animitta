@@ -105,12 +105,22 @@ export function createFakeDynamoDb() {
   // split queries into pages, or have batch writes hand back unprocessed deletes.
   const hooks = { beforeTransaction: async () => {}, queryPageSize: Infinity, unprocessedBatches: 0 }
 
+  // Supports "SET a = :v" and "ADD a :n" clauses, one attribute each, in either order.
   function applyUpdate(input, row) {
-    const match = input.UpdateExpression.match(/^SET ([#\w]+) = (:\w+)$/)
-    if (!match) throw new Error(`fake DynamoDB cannot apply: ${input.UpdateExpression}`)
-    const name = input.ExpressionAttributeNames?.[match[1]] ?? match[1]
-    if (RESERVED.has(name) && !match[1].startsWith('#')) throw invalid(`Attribute name is a reserved keyword: ${name}`)
-    return { ...(row ?? input.Key), [name]: input.ExpressionAttributeValues[match[2]] }
+    const clauses = input.UpdateExpression.match(/(SET|ADD) [^]*?(?=\s+(?:SET|ADD) |$)/g)
+    if (!clauses || clauses.join(' ') !== input.UpdateExpression) throw new Error(`fake DynamoDB cannot apply: ${input.UpdateExpression}`)
+    const next = { ...(row ?? input.Key) }
+    for (const clause of clauses) {
+      const match = clause.match(/^(SET ([#\w]+) = |ADD ([#\w]+) )(:\w+)$/)
+      if (!match) throw new Error(`fake DynamoDB cannot apply: ${clause}`)
+      const token = match[2] ?? match[3]
+      const name = input.ExpressionAttributeNames?.[token] ?? token
+      if (RESERVED.has(name) && !token.startsWith('#')) throw invalid(`Attribute name is a reserved keyword: ${name}`)
+      const value = input.ExpressionAttributeValues[match[4]]
+      if (match[2]) next[name] = value
+      else next[name] = { N: String(Number(next[name]?.N ?? 0) + Number(value.N)) }
+    }
+    return next
   }
 
   const handlers = {

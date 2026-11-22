@@ -20,16 +20,36 @@ export async function linkRichMenu(userId, richMenuId) {
   if (!res.ok) throw new Error(`LINE link rich menu failed: ${res.status}`)
 }
 
-export async function showLoadingIndicator(userId) {
+// LINE shows the animation for loadingSeconds (5 to 60, in steps of 5; 20
+// when left out) or until the bot's next message arrives. A later call
+// replaces the time.
+export async function showLoadingIndicator(userId, loadingSeconds) {
   const res = await fetch('https://api.line.me/v2/bot/chat/loading/start', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
     },
-    body: JSON.stringify({ chatId: userId }),
+    body: JSON.stringify({ chatId: userId, ...(loadingSeconds && { loadingSeconds }) }),
   })
   if (!res.ok) throw new Error(`LINE loading indicator failed: ${res.status}`)
+}
+
+/**
+ * The file a user sent. LINE answers 202 while it is still preparing a large
+ * audio or video file, so this asks again until the file is ready or the
+ * deadline (a Date.now() value) passes.
+ */
+export async function downloadContent(messageId, deadline) {
+  for (;;) {
+    const res = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
+      headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}` },
+    })
+    if (res.status === 200) return Buffer.from(await res.arrayBuffer())
+    if (res.status !== 202) throw new Error(`LINE content download failed: ${res.status}`)
+    if (Date.now() >= deadline) throw new Error('LINE content was still being prepared at the deadline')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
 }
 
 export async function replyMessage(replyToken, text) {

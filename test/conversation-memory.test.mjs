@@ -187,13 +187,13 @@ describe('conversation memory, end to end', () => {
 
     it('remembers a photo it could not read, so the next message can refer to it', async () => {
       await send({ type: 'message', message: { type: 'image', id: 'img1' } })
-      expect(lineReplies[0]).toContain('只能讀文字')
+      expect(lineReplies[0]).toContain('還看不懂')
 
       await sendText('你覺得那張怎樣')
 
       const sent = everythingSent(chatRequests[0])
       expect(sent).toContain('（傳了一張圖片）')
-      expect(sent).toContain('只能讀文字')
+      expect(sent).toContain('還看不懂')
     })
 
     it('answers a sticker through the model', async () => {
