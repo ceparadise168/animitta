@@ -1,8 +1,10 @@
 import { describe, it, expect } from '@jest/globals'
 import { talksOfEndingLife, CRISIS_FALLBACK_REPLY } from '../lambda/crisis.mjs'
 
-// Written for the tests, partly by an adversarial review (2026-11-23); no real
-// user wrote them.
+// Written for the tests, partly by two adversarial reviews (2026-11-23); no real
+// user wrote them. Everyday talk includes news, films, someone else's words and
+// questions about what Buddhism says: the owner asked for the hotlines to stay
+// out of those (再緊一點，不要隨意亂吐專線).
 const ENDING_LIFE = [
   "我快撐不住了 想死",
   "我真的不想活了",
@@ -96,6 +98,14 @@ const ENDING_LIFE = [
   "我想自殺",
   "想要死掉",
   "我在頂樓 想跳下去",
+  "我看了新聞，我也想自殺",
+  "我想自殺，佛教會怎麼看",
+  "我打算自殺",
+  "想燒炭",
+  "我想上吊",
+  "我想跳樓",
+  "新聞說有人跳樓 我也想跳樓",
+  "我朋友說他想死 我也想死",
 ]
 
 const EVERYDAY = [
@@ -174,12 +184,6 @@ const EVERYDAY = [
   '老闆很認真的罵我 罵到想死',
   '跳樓大甩賣',
   '全館跳樓大放送',
-]
-
-// These everyday lines fire too, on purpose: this only runs when the AI service
-// has failed, and hearing 我不想活在這個世界上了, 分手之後只想一了百了 or 我媽死了
-// 想死 matters more than an extra line of numbers after 物價高根本活不下去.
-const HEARD_TOO = [
   '痛到想死 牙齒好痛',
   '不想活在別人的期待裡',
   '丟臉死了想死',
@@ -200,7 +204,22 @@ const HEARD_TOO = [
   '我同學說他想死 我該怎麼辦',
   '新聞說有人燒炭',
   '電影裡的主角最後自殺了',
+  '新聞說有人在捷運站跳樓',
+  '昨天看到新聞說某某明星自殺了好可惜',
+  '他不想活的樣子我看了很心疼',
+  '那部電影主角最後一了百了',
+  '我阿嬤以前常說死了算了 但她現在九十歲很健康',
+  '電視劇女主角割腕那段好真實',
+  '燒炭的新聞好多',
+  '輕生的人越來越多 社會怎麼了',
+  '我在寫輕生新聞的報導',
+  '為什麼金剛經不講自殺',
+  '佛教怎麼看自殺',
+  '佛教說自殺會下地獄嗎',
+  '我常常熬夜，算是在傷害自己的身體吧',
+  '想死他了',
 ]
+
 
 describe('talksOfEndingLife', () => {
   it.each(ENDING_LIFE)('hears "%s"', (text) => {
@@ -209,10 +228,6 @@ describe('talksOfEndingLife', () => {
 
   it.each(EVERYDAY)('lets everyday talk "%s" pass', (text) => {
     expect(talksOfEndingLife(text)).toBe(false)
-  })
-
-  it.each(HEARD_TOO)('also hears "%s", leaning toward hearing it', (text) => {
-    expect(talksOfEndingLife(text)).toBe(true)
   })
 
   it('hears nothing when there are no words', () => {
