@@ -124,6 +124,12 @@ describe('SYSTEM_PROMPT', () => {
     const demos = buildMessages({ summary: null, recentTurns: [], userInput: '嗨' })[1].content
     expect(demos).toContain('1925 安心專線、1995 生命線，24 小時都可以打，一支打不通就換另一支')
     expect(SYSTEM_PROMPT + demos).not.toContain('都有人接')
+    expect(SYSTEM_PROMPT).toContain('不要保證一定有人接')
+  })
+
+  it('treats everyday exaggeration as everyday, and asks when it cannot tell', () => {
+    expect(SYSTEM_PROMPT).toContain('「累到想死」「熱死了」「笑死」這種日常誇飾不算危機訊號')
+    expect(SYSTEM_PROMPT).toContain('聽不出他是不是認真的，就直接問他一句，先不要丟專線')
   })
 
   it('says when 1980 answers, breaks included', () => {
