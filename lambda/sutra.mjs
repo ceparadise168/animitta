@@ -16,10 +16,9 @@ const CHAPTER_HAN = CHAPTERS.map((c) => han(c.text))
 const WHOLE_HAN = CHAPTER_HAN.join('')
 const MOST_CHAPTERS = 2
 
-// Words that say the message is about the sutra. 經上, 經中 and 經裡 count
-// unless they end another word: 已經上班, 曾經中獎, 神經裡.
-export const ABOUT_THE_SUTRA =
-  /金剛經|佛經|這部經|(?<![已曾神歷財政途必正取])經(文|裡|中|上)|哪一分(?!鐘)|第幾分(?!鐘)|佛說|佛陀/
+// Words that say the message is about this sutra. Not 佛經, 經裡 or 經上 on
+// their own: 心經裡, 法華經裡 and 聖經上 are other books, and 已經上班 is none.
+export const ABOUT_THE_SUTRA = /金剛經|這部經|經文|佛說|佛陀|哪一分(?!鐘)|第幾分(?!鐘)/
 
 // Five characters of the sutra in a row read as a quote. Four do only for its
 // best-known short phrases, or when the message is plainly about the sutra:
@@ -63,14 +62,19 @@ function quotedIn(text) {
   return []
 }
 
-// Asked by chapter: 第十四分, 第 14 分, 離相寂滅分, and next to a word about the
-// sutra also 金剛經第十四章 or 金剛經十四品. Without such a word, a bare 第N分
-// counts only when the message opens with it and asks about it
-// (第十四分在講什麼), or names two chapters: 拿到第一分 and 第二分的時候 are
-// scores, and 第三分鐘, 第二分店 and 三分之一 are not chapters at all.
-const CHAPTER_REF = /(第)?\s*([一二三四五六七八九十廿卅]{1,3}|\d{1,2})\s*(分|章|品)(?![鐘鍾之店局隊行院處區數])/g
-const OPENS_WITH_A_CHAPTER = /^\s*(那|請問|想問|問一下|欸|所以)?\s*第/
-const ASKS_ABOUT_IT = /^\s*(在講|講什麼|講的|在說|說什麼|說的|是什麼|是在|的意思|的內容|的重點|的原文|原文|呢|嗎|[？?]|$)/
+// Asked by chapter: 第十四分, 第 14 分, 金剛經第十四章, 金剛經十四品, 離相寂滅分.
+// A number needs 第 or 金剛經 right before it: 哪一分 is "which chapter", 十分
+// 感動 is "very", 考了二十分 is a score. Without a word about the sutra, a 第N分
+// must also be asked about (第十四分在講什麼, 解釋第十四分, a message that is only
+// 第十四分?) or compared (第十四分跟第十五分差在哪), so 拿到第一分, 第二分的時候
+// and 第一分館跟第二分館 are not chapters.
+const CHAPTER_REF =
+  /(第|金剛經的?)\s*([一二三四五六七八九十廿卅]{1,3}|\d{1,2})\s*(分|章|品)(?![鐘鍾之店局隊行院處區數館公校部會享社所組機線身半量卷點期])/g
+const ASKS_ABOUT_IT =
+  /^\s*(在講|講什麼|講啥|講的|在說|說什麼|說啥|說的|是什麼|是啥|是在講|是在說|的意思|的內容|的重點|的原文|原文|可以講|可以解釋|我看不懂|看不懂|怎麼解釋|[？?])/
+const ASKING_FIRST = /(解釋|說明|講講|講一下|介紹|問|聊聊|想知道|請教)(一下)?\s*$/
+const ONLY_A_CHAPTER = /^\s*(那|請問|想問|我想問|問一下|請問一下|欸|所以)?\s*第\s*\S{1,3}\s*分\s*[？?嗎呢]?\s*$/
+const COMPARING = /差在哪|差別|有什麼不同|不一樣|比較/
 const DIGITS = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
 
 function chapterNumber(written) {
@@ -86,24 +90,27 @@ function byChapterName(text) {
   const plain = text.replace(/[０-９]/g, (d) => String(d.charCodeAt(0) - 0xff10))
   const aboutSutra = ABOUT_THE_SUTRA.test(plain)
   const refs = [...plain.matchAll(CHAPTER_REF)]
-  const firstChapterAt = plain.indexOf('第')
-  const twoChapters = refs.filter(([, di, , unit]) => di && unit === '分').length >= 2
-  const asksAfter = (all, index) => ASKS_ABOUT_IT.test(plain.slice(index + all.length))
-  // Without 第, 十分 is "very" (金剛經讓我十分感動), so it has to be asked about.
-  const isAChapter = ({ 0: all, 1: di, 3: unit, index }) => {
-    if (aboutSutra) return Boolean(di) || asksAfter(all, index)
-    if (!di || unit !== '分') return false
-    return twoChapters || (OPENS_WITH_A_CHAPTER.test(plain) && index === firstChapterAt && asksAfter(all, index))
-  }
+  const comparesTwo = refs.filter(({ 3: unit }) => unit === '分').length >= 2 && COMPARING.test(plain)
+  const isAChapter = ({ 0: all, 3: unit, index }) =>
+    aboutSutra ||
+    (unit === '分' &&
+      (ASKS_ABOUT_IT.test(plain.slice(index + all.length)) ||
+        ASKING_FIRST.test(plain.slice(Math.max(0, index - 8), index)) ||
+        ONLY_A_CHAPTER.test(plain) ||
+        comparesTwo))
   const byNumber = refs
     .filter(isAChapter)
-    .map(([, , written]) => CHAPTERS[chapterNumber(written) - 1])
+    .map(({ 2: written }) => CHAPTERS[chapterNumber(written) - 1])
     .filter(Boolean)
+  // 離相寂滅分, 離相寂滅那一分, 離相寂滅在講什麼; not 依法出生登記 or 無法可得到他的心.
   const byTitle = CHAPTERS.filter((c) => {
     const name = c.title.replace(/分第.+$/, '')
-    return [`${name}分`, `${name}那一分`, `${name}這一分`].some((n) => plain.includes(n)) || (aboutSutra && plain.includes(name))
+    const at = plain.indexOf(name)
+    if (at < 0) return false
+    const after = plain.slice(at + name.length)
+    return /^(分|那一分|這一分)/.test(after) || aboutSutra || ASKS_ABOUT_IT.test(after)
   })
-  return [...byNumber, ...byTitle].map((chapter) => ({ chapter, why: `他問的是〈${chapter.title}〉` }))
+  return [...byNumber, ...byTitle].map((chapter) => ({ chapter, why: `他可能在問〈${chapter.title}〉` }))
 }
 
 // Asked by topic. Names and terms only the sutra uses count on their own; a
@@ -111,8 +118,13 @@ function byChapterName(text) {
 // counts only next to a word about the sutra. 無相 is not 無相界, this bot.
 const TOPICS = [
   { words: /須菩提.{0,6}(哭|流淚|涕淚|悲泣)/, chapters: [14], alone: true },
-  { words: /須菩提(是誰|是什麼|是哪|是佛的)/, chapters: [2], alone: true, note: '須菩提是佛的弟子，經裡向佛提問的人，第一次開口在這一分' },
-  { words: /燃燈佛|然燈佛|授記|受記/, chapters: [10, 17], alone: true },
+  {
+    words: /須菩提(是誰|是什麼|是哪|是佛的)|誰是須菩提|須菩提.{0,4}問|叫須菩提/,
+    chapters: [2],
+    alone: true,
+    note: '須菩提是佛的弟子，經裡向佛提問的人，第一次開口在這一分',
+  },
+  { words: /燃燈佛|然燈佛|授記|受記(?!者)/, chapters: [10, 17], alone: true },
   { words: /歌利王/, chapters: [14], alone: true },
   {
     words: /四句偈/,
@@ -124,9 +136,10 @@ const TOPICS = [
   { words: /筏喻/, chapters: [6], alone: true },
   { words: /六如/, chapters: [32], alone: true },
   { words: /無為法/, chapters: [7], alone: true },
-  { words: /無所住/, chapters: [10, 4], alone: true },
-  { words: /五眼(是什麼|是哪|指的是|在講)/, chapters: [18], alone: true },
-  { words: /五眼/, chapters: [18] },
+  { words: /無所住(是什麼|是啥|的意思|是指|在講|怎麼理解)/, chapters: [10, 4], alone: true },
+  { words: /無所住/, chapters: [10, 4] },
+  { words: /(什麼是|何謂)五眼(?!聯盟)|五眼(是什麼|指的是|在講)/, chapters: [18], alone: true },
+  { words: /五眼(?!聯盟)/, chapters: [18] },
   { words: /忍辱/, chapters: [14] },
   { words: /筏/, chapters: [6] },
   { words: /四相|我相人相|眾生相|壽者相/, chapters: [3] },
@@ -137,7 +150,7 @@ const TOPICS = [
   { words: /無相(?!界)/, chapters: [5] },
   { words: /開頭|第一段|第一句/, chapters: [1] },
   { words: /結尾|最後一段|最後那段|最後一句|最後一分/, chapters: [32] },
-  { words: /經名|為什麼叫/, chapters: [13] },
+  { words: /經名|經的名字|為什麼叫(做)?金剛|叫做金剛/, chapters: [13] },
 ]
 
 function byTopic(text) {
@@ -145,7 +158,7 @@ function byTopic(text) {
   return TOPICS.filter(({ words, alone }) => words.test(text) && (alone || aboutSutra)).flatMap(({ words, chapters, note }) =>
     chapters.map((n) => ({
       chapter: CHAPTERS[n - 1],
-      why: `他問的「${text.match(words)[0]}」${note ? `：${note}。這段` : ''}在〈${CHAPTERS[n - 1].title}〉`,
+      why: `他提到的「${text.match(words)[0]}」${note ? `（${note}）` : ''}跟〈${CHAPTERS[n - 1].title}〉有關`,
     })),
   )
 }
@@ -154,21 +167,24 @@ function byTopic(text) {
 // as today's line. It has to be plainly about that line, so 這段時間好累 and
 // 我不懂我媽為什麼這樣 are not. Only quotes of six characters or more that are
 // in the sutra count, so the user's own words in quotes (「只能這樣」) do not.
-const POINTS_AT_THE_LINE = /這句|那句|這一句|那一句|這兩句|這段經|那段經|這段話|那段話|出處|出自|哪一分|第幾分(?!鐘)|原文/
+const POINTS_AT_THE_LINE =
+  /這句|這一句|剛剛那句|剛才那句|你說的那句|你引的那句|這段經文|那段經文|這兩句|^\s*(出處|原文|出自哪)|哪一分(?!鐘)|第幾分(?!鐘)/
 const ONLY_ASKS_WHAT_IT_MEANS =
-  /^(那|欸|嗯|所以|請問)?\s*我?(還是)?(這是|那是)?(是什麼意思|什麼意思|看不懂|不懂|聽不懂|不太懂|怎麼解釋|在講什麼|在說什麼)[嗎呢啊耶欸喔？?。!！~\s]*$/
+  /^(喔|蛤|嗯+|欸|那|所以|請問|有點|可是)?\s*我?(還是)?(這段話|那段話|這段|這個|這|那)?(是)?(什麼意思|啥意思|看不懂|看不太懂|不懂|聽不懂|不太懂|怎麼解釋|在講什麼|在說什麼|可以解釋一下嗎|能講白話一點嗎|從哪裡來的|哪裡來的)[嗎呢啊耶欸喔？?。!！~\s]*$/
 
-// 我老闆那段話到底什麼意思 is about someone else's words.
-const SOMEONE_ELSE_SAID = /(他|她|老闆|主管|同事|朋友|我媽|我爸|媽媽|爸爸|老師|男友|女友|男朋友|女朋友|老公|老婆|家人|別人|對方).{0,6}(這句|那句|這段|那段|說)/
+// 我老闆那段話到底什麼意思 and 他說的這句話 are someone else's words; 這句出自哪
+// 裡？我媽也常說 is not.
+const SOMEONE_ELSES_LINE =
+  /(他|她|老闆|主管|同事|朋友|我媽|我爸|媽媽|爸爸|老師|男友|女友|男朋友|女朋友|老公|老婆|家人|別人|對方)(說的|講的|的)?(這句|那句|這段|那段)/
 
 function referredBack(text, lastReply) {
-  if (!lastReply || SOMEONE_ELSE_SAID.test(text)) return []
+  if (!lastReply || SOMEONE_ELSES_LINE.test(text)) return []
   if (!(POINTS_AT_THE_LINE.test(text) || ONLY_ASKS_WHAT_IT_MEANS.test(text.trim()))) return []
   return [...lastReply.matchAll(/「([^」]+)」/g)]
     .map(([, quote]) => han(quote))
     .filter((words) => words.length >= 6)
     .flatMap((words) => CHAPTERS.filter((_, i) => CHAPTER_HAN[i].includes(words)).slice(0, 1))
-    .map((chapter) => ({ chapter, why: `他問的是你剛剛引的那句，出自〈${chapter.title}〉` }))
+    .map((chapter) => ({ chapter, why: `他可能在問你剛剛引的那句，那句出自〈${chapter.title}〉` }))
 }
 
 /**
@@ -228,7 +244,8 @@ const DAY_MS = 86_400_000
 
 export function todaysLine(now = Date.now()) {
   const at = Number.isFinite(now) ? now : Date.now()
-  const [line, chapterNumber] = DAILY_LINES[Math.floor((at + TAIPEI_OFFSET_MS) / DAY_MS) % DAILY_LINES.length]
+  const day = Math.floor((at + TAIPEI_OFFSET_MS) / DAY_MS)
+  const [line, chapterNumber] = DAILY_LINES[((day % DAILY_LINES.length) + DAILY_LINES.length) % DAILY_LINES.length]
   return { line, chapter: CHAPTERS[chapterNumber - 1] }
 }
 
@@ -242,8 +259,9 @@ export function todaysLineReply(now = Date.now()) {
 
 export function passageNote(passages) {
   return (
-    '（內部參考，不要念給他聽：他這句話提到的經文，程式查到的出處如下。講出處、上下文時以這段原文為準，不要憑印象。' +
-    '加引號就逐字照抄原文；白話翻譯不要放進引號裡。他沒在問經文的話，不要因為看到這段就把話題帶到金剛經。）\n' +
+    '（內部參考，不要念給他聽：下面是程式從他的話猜出來、可能用得上的經文，不一定是他要問的。' +
+    '他在問經文的話，講出處、上下文時以這段原文為準，不要憑印象；加引號就逐字照抄原文，白話翻譯不要放進引號裡。' +
+    '他沒在問經文的話，就當沒看到，不要因為這段把話題帶到金剛經。）\n' +
     passages.map(({ chapter, why }) => `${why}。這一分的原文：\n${chapter.text}`).join('\n\n')
   )
 }
