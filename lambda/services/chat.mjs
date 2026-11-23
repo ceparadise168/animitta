@@ -31,12 +31,22 @@ export async function handleText(userId, replyToken, userText, sentAt, { onRepli
     await replyMessage(replyToken, reply)
   } catch (err) {
     // Whoever apologises instead has to know what went unanswered.
-    err.unanswered = userText
-    throw err
+    throw withUnanswered(err, userText)
   }
   onReplied?.()
 
   await remember(userId, context, userText, reply, provider, sentAt)
+}
+
+// Writing onto a frozen error or a thrown string would itself throw and hide
+// the real error, and the crisis apology with it, so those are wrapped instead.
+function withUnanswered(err, userText) {
+  const carrier =
+    typeof err === 'object' && err !== null && Object.isExtensible(err)
+      ? err
+      : new Error(String(err?.message ?? err), { cause: err })
+  carrier.unanswered = userText
+  return carrier
 }
 
 // For a fixed bot line that the next message may answer, such as the

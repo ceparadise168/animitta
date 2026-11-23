@@ -102,9 +102,22 @@ describe('chat service', () => {
       mockProvider.chatCompletion.mockRejectedValue(new Error('Anthropic chat failed: 529'))
 
       await expect(handleText('user1', 'token1', '我真的不想活了', Date.now())).rejects.toMatchObject({
+        message: 'Anthropic chat failed: 529',
         unanswered: '我真的不想活了',
       })
       expect(mockSaveTurn).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['a frozen error', Object.freeze(new Error('frozen'))],
+      ['a thrown string', 'boom'],
+    ])('still says which words went unanswered after %s', async (_, thrown) => {
+      mockProvider.chatCompletion.mockRejectedValue(thrown)
+
+      await expect(handleText('user1', 'token1', '我真的不想活了', Date.now())).rejects.toMatchObject({
+        unanswered: '我真的不想活了',
+        cause: thrown,
+      })
     })
   })
 })
