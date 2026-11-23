@@ -32,7 +32,7 @@ const COUNTER_DAYS = 40
 const REMEMBERED_AS = '（傳了一段語音）'
 const LIMIT_REPLIES = {
   user:
-    `這段語音超過這個月剩下的語音額度了（每個月 ${VOICE_MINUTES_PER_MONTH} 分鐘），我沒辦法聽。` +
+    `這段語音超過你這個月剩下的語音額度了（每個月 ${VOICE_MINUTES_PER_MONTH} 分鐘，下個月 1 號重新計算），我沒辦法聽。` +
     '想用說的，可以點鍵盤上的麥克風，說完會變成文字傳給我',
   everyone:
     '這個月大家的語音額度已經用完了，下個月 1 號會恢復。' +

@@ -209,7 +209,7 @@ describe('voice messages', () => {
 
     expect(usedSeconds('2026-11')).toBe(30 * 60)
     expect(everyoneSeconds('2026-11')).toBe(10)
-    expect(lineReplies[1]).toContain('超過這個月剩下的語音額度了（每個月 30 分鐘）')
+    expect(lineReplies[1]).toContain('超過你這個月剩下的語音額度了（每個月 30 分鐘，下個月 1 號重新計算）')
     expect(lineReplies[1]).toContain('鍵盤上的麥克風')
     expect(chatRequests).toHaveLength(1)
     expect(userTurns()).toEqual(['最近工作壓力很大，晚上睡不著', '（傳了一段語音）'])
