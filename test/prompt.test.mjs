@@ -105,4 +105,11 @@ describe('SYSTEM_PROMPT', () => {
     expect(SYSTEM_PROMPT).toContain('引整句原文，適合')
     expect(SYSTEM_PROMPT).toContain('不適合：剛在抒發')
   })
+
+  it('gives the two 24-hour suicide hotlines first, and says when 1980 is closed', () => {
+    expect(SYSTEM_PROMPT).toContain('1925 安心專線和 1995 生命線，兩支都 24 小時有人接')
+    expect(SYSTEM_PROMPT).toContain('1980 張老師不是 24 小時')
+    const demos = buildMessages({ summary: null, recentTurns: [], userInput: '嗨' })[1].content
+    expect(demos).toContain('1925 安心專線、1995 生命線，24 小時都有人接')
+  })
 })
