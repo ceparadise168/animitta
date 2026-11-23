@@ -1,0 +1,43 @@
+import { describe, it, expect } from '@jest/globals'
+import { readFileSync } from 'node:fs'
+import { SYSTEM_PROMPT } from '../lambda/prompt.mjs'
+
+// Every sutra line the bot is given or says on its own must be the text itself:
+// the prompt rule says a quoted line comes word for word from the library, so a
+// reworded line in the library becomes a misquote (2026-11-23: 5 of 14 were).
+const chapters = JSON.parse(readFileSync(new URL('../lambda/diamond-sutra.json', import.meta.url), 'utf8'))
+const han = (s) => (s.match(/[一-鿿]/g) || []).join('')
+const chapterOf = (line) => chapters.find((c) => han(c.text).includes(han(line)))
+
+describe('the Diamond Sutra text', () => {
+  it('has all 32 chapters, titled in traditional characters', () => {
+    expect(chapters).toHaveLength(32)
+    expect(chapters[20].title).toBe('非說所說分第二十一')
+    expect(chapters.at(-1).title).toBe('應化非真分第三十二')
+  })
+})
+
+describe('the scripture library in the prompt', () => {
+  const library = SYSTEM_PROMPT.split('<經文庫 — 純金剛經>')[1].split('</經文庫 — 純金剛經>')[0]
+  const entries = library
+    .split('\n')
+    .filter((l) => l.startsWith('- '))
+    .map((l) => l.slice(2).match(/^(.*)（(.+)）$/).slice(1))
+
+  it('still holds the fourteen lines', () => {
+    expect(entries).toHaveLength(14)
+  })
+
+  it.each(entries)('quotes "%s" word for word, from the chapter it names', (line, title) => {
+    expect(chapterOf(line)?.title).toBe(title)
+  })
+})
+
+describe('the casual-chat openers', () => {
+  it('quote the sutra word for word', () => {
+    const source = readFileSync(new URL('../lambda/commands.mjs', import.meta.url), 'utf8')
+    const quotes = [...source.matchAll(/「([^」]+)」/g)].map((m) => m[1]).filter((q) => han(q).length >= 6)
+    expect(quotes.length).toBeGreaterThan(0)
+    for (const q of quotes) expect(chapterOf(q)).toBeDefined()
+  })
+})
