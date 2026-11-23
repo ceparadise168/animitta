@@ -2,16 +2,20 @@
 // rollback: git checkout prompt-v2 -- lambda/prompt.mjs
 import { passagesFor, passageNote } from './sutra.mjs'
 
-// 衛福部's free counselling for 15–45-year-olds (115年青壯世代心理健康支持方案)
-// runs to 2026-12-31 and nothing says it continues, so from 2027 on the bot
-// stops offering it by itself. The prompt is built when the function starts,
-// so a warm instance may offer it for a few more hours.
+// 衛福部 pays for three counselling sessions for 15–45-year-olds
+// (115年青壯世代心理健康支持方案) to 2026-12-31, and nothing says it continues,
+// so from 2027 on the bot stops offering it by itself. The fee for each visit
+// is not covered, and all three must be used by the end of the year (the
+// ministry's FAQ, 2026-05-13). The prompt is built when the function starts, so
+// a warm instance may offer it for a few more hours.
 const YOUNG_ADULT_COUNSELLING_ENDS = Date.parse('2027-01-01T00:00:00+08:00')
 
 export function realPeopleParagraph(now = Date.now()) {
-  const places = ['各縣市的社區心理衛生中心或衛生局，有免費或便宜的心理諮商可以預約']
+  const places = ['各縣市衛生局的社區心理衛生中心可以提供或轉介心理諮詢，不少縣市還有免費的諮商可以預約']
   if (now < YOUNG_ADULT_COUNSELLING_ENDS) {
-    places.push('他如果在 15 到 45 歲之間，今年底前還能用衛福部的「心理健康支持方案」免費諮商 3 次，上網搜這個名字就找得到合作的診所')
+    places.push(
+      '他如果在 15 到 45 歲之間，衛福部的「青壯世代心理健康支持方案」今年底前還補助 3 次心理諮商費（掛號費可能要自己付，3 次都要在年底前做完，名額也可能滿了），上網搜這個方案名稱就查得到合作的機構',
+    )
   }
   return (
     '如果他說這樣已經好一陣子了，或聊下來一直繞回同一個地方、找不到出口，可以在適合的時候提一次：找真人聊也是一條路。' +
@@ -217,7 +221,7 @@ ${realPeopleParagraph()}
 </基本紀律>
 
 <經文庫 — 純金剛經>
-鳩摩羅什譯，江味農校定本。每一句都逐字照原文抄下來，引用時一個字都不要改。
+鳩摩羅什譯（維基文庫本）。每一句都逐字照原文抄下來，引用時一個字都不要改。
 
 【常用】
 - 一切有為法，如夢幻泡影，如露亦如電，應作如是觀。（應化非真分第三十二）
