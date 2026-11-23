@@ -97,5 +97,14 @@ describe('chat service', () => {
 
       expect(onReplied).not.toHaveBeenCalled()
     })
+
+    it('says which words went unanswered when the model fails', async () => {
+      mockProvider.chatCompletion.mockRejectedValue(new Error('Anthropic chat failed: 529'))
+
+      await expect(handleText('user1', 'token1', '我真的不想活了', Date.now())).rejects.toMatchObject({
+        unanswered: '我真的不想活了',
+      })
+      expect(mockSaveTurn).not.toHaveBeenCalled()
+    })
   })
 })

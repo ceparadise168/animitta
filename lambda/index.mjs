@@ -2,6 +2,7 @@ import { verifySignature, replyMessage, linkRichMenu } from './line.mjs'
 import { handleText, replyAndRemember } from './services/chat.mjs'
 import { handleVoice } from './services/voice.mjs'
 import { handleCommand, handlePostback, isCommand } from './commands.mjs'
+import { CRISIS_FALLBACK_REPLY, talksOfEndingLife } from './crisis.mjs'
 
 const WELCOME_MESSAGE =
   '嗨～我是無相界 🌿\n\n' +
@@ -84,6 +85,7 @@ async function handleEvent(lineEvent) {
   } catch (err) {
     console.error('Handler error:', err)
     // Fails harmlessly when the reply token was already used before the error.
-    await replyMessage(replyToken, FALLBACK_REPLY).catch(() => {})
+    const apology = talksOfEndingLife(err?.unanswered) ? CRISIS_FALLBACK_REPLY : FALLBACK_REPLY
+    await replyMessage(replyToken, apology).catch(() => {})
   }
 }

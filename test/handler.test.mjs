@@ -283,6 +283,28 @@ describe('Lambda handler', () => {
     expect(mockReplyMessage).toHaveBeenCalledWith('tok', expect.stringContaining('暫時'))
   })
 
+  it('gives the 24-hour hotlines when the words that went unanswered talk of ending a life', async () => {
+    const err = Object.assign(new Error('Anthropic chat failed: 529'), { unanswered: '我真的不想活了' })
+    mockHandleText.mockRejectedValue(err)
+    mockReplyMessage.mockResolvedValue(undefined)
+
+    await handler(makeEvent(textEvent))
+
+    const apology = mockReplyMessage.mock.calls[0][1]
+    expect(apology).toContain('1925')
+    expect(apology).toContain('1995')
+  })
+
+  it('keeps the ordinary apology for everyday exaggeration', async () => {
+    const err = Object.assign(new Error('Anthropic chat failed: 529'), { unanswered: '今天累到想死 笑死' })
+    mockHandleText.mockRejectedValue(err)
+    mockReplyMessage.mockResolvedValue(undefined)
+
+    await handler(makeEvent(textEvent))
+
+    expect(mockReplyMessage.mock.calls[0][1]).not.toContain('1925')
+  })
+
   it('still returns 200 when the fallback reply is rejected', async () => {
     mockHandleText.mockRejectedValue(new Error('DynamoDB save failed'))
     mockReplyMessage.mockRejectedValue(new Error('LINE reply failed: 400'))

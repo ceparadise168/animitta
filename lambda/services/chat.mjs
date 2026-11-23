@@ -21,12 +21,19 @@ export async function handleText(userId, replyToken, userText, sentAt, { onRepli
 
   showLoadingIndicator(userId).catch((err) => console.warn(err.message))
 
-  const context = await getContext(userId)
-  const { text } = await provider.chatCompletion(buildMessages({ ...context, userInput: userText }), {
-    signal: AbortSignal.timeout(answerWithin(sentAt)),
-  })
-  const reply = stripMarkdown(text)
-  await replyMessage(replyToken, reply)
+  let context, reply
+  try {
+    context = await getContext(userId)
+    const { text } = await provider.chatCompletion(buildMessages({ ...context, userInput: userText }), {
+      signal: AbortSignal.timeout(answerWithin(sentAt)),
+    })
+    reply = stripMarkdown(text)
+    await replyMessage(replyToken, reply)
+  } catch (err) {
+    // Whoever apologises instead has to know what went unanswered.
+    err.unanswered = userText
+    throw err
+  }
   onReplied?.()
 
   await remember(userId, context, userText, reply, provider, sentAt)
