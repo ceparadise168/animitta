@@ -11,12 +11,19 @@ const han = (s) => (s.match(/[一-鿿]/g) || []).join('')
 const chapterOf = (line) => chapters.find((c) => han(c.text).includes(han(line)))
 
 describe('the Diamond Sutra text', () => {
-  it('has all 32 chapters, titled in traditional characters, without the 密 typo of the source', () => {
+  it('has all 32 chapters, titled in traditional characters, without a 密 for 蜜', () => {
     expect(chapters).toHaveLength(32)
     expect(chapters[20].title).toBe('非說所說分第二十一')
     expect(chapters.at(-1).title).toBe('應化非真分第三十二')
     expect(chapters[13].text).toContain('是名忍辱波羅蜜')
     expect(chapters.some((c) => c.text.includes('波羅密'))).toBe(false)
+  })
+
+  it('is the circulated text most people recite (流通本), not the Wikisource mix used before', () => {
+    expect(han(chapters[7].text)).not.toContain('是名佛法')
+    expect(han(chapters[13].text)).toContain('若心有住即為非住')
+    expect(han(chapters[13].text)).toContain('如人入暗即無所見')
+    expect(chapters.map((c) => han(c.text)).join('')).toHaveLength(5174)
   })
 })
 

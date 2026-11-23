@@ -16,6 +16,11 @@ describe('passagesFor', () => {
     expect(titlesFor(text)).toEqual(titles)
   })
 
+  it('finds the chapter when the person recites another printing (則 for 即, 恆 for 恒)', () => {
+    expect(titlesFor('若心有住則為非住是什麼意思')).toEqual(['離相寂滅分第十四'])
+    expect(titlesFor('如恆河中所有沙數，如是沙等恆河')).toEqual(['無為福勝分第十一'])
+  })
+
   it('reads an everyday saying the sutra also has as a quote only when the message is about the sutra', () => {
     expect(titlesFor('太不可思議了吧 他居然真的辭職')).toEqual([])
     expect(titlesFor('金剛經裡說的不可思議是在講什麼').length).toBeGreaterThan(0)
@@ -179,7 +184,7 @@ describe('passageNote', () => {
   it('hands over the whole chapter and asks for word-for-word quotes', () => {
     const note = passageNote(passagesFor('應無所住而生其心是什麼意思'))
     expect(note).toContain('〈莊嚴淨土分第十〉')
-    expect(note).toContain('不應住聲、香、味、觸、法生心，應無所住而生其心。')
+    expect(note).toContain('不應住聲香味觸法生心，應無所住而生其心。')
     expect(note).toContain('加引號就逐字照抄原文')
     expect(note).toContain('不一定是他要問的')
     expect(note).toContain('他沒在問經文的話，就當沒看到')

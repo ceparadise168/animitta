@@ -1,9 +1,11 @@
 import { readFileSync } from 'node:fs'
 
-// 金剛經全文：鳩摩羅什譯，32 分，取自維基文庫。That page calls itself 江味農
-// 校定本, but checked against 江味農's own collation notes and CBETA T0235
-// (2026-11-23) it follows the circulated text in about 60 places, so which
-// edition to keep is for someone who recites the sutra to confirm.
+// 金剛經全文：鳩摩羅什譯，流通本（佛教城 book.bfnn.org/books/0040），the text
+// most people recite, chosen by the owner on 2026-11-23. It carries no chapter
+// titles, so the 32 titles (昭明太子's division) are kept from the previous
+// text, split at the same places. Its words differ from that text only in
+// single characters (即/則, 恒/恆, 暗/闇, 繞/遶) and in lacking 是名佛法 in the
+// eighth chapter, as 江味農's collation and CBETA T0235 lack it too.
 //
 // The whole text is looked up here instead of sitting in the prompt. With all
 // of it in the prompt the model got 3 of 6 questions about where a line is
@@ -11,7 +13,11 @@ import { readFileSync } from 'node:fs'
 // user's words come from, 8 of 9 (2026-11-22).
 export const CHAPTERS = JSON.parse(readFileSync(new URL('./diamond-sutra.json', import.meta.url), 'utf8'))
 
-const han = (text) => (text.match(/[一-鿿]/g) || []).join('')
+// Printings of the sutra write some characters differently, so the lookup
+// reads them as one: someone who recites 若心有住則為非住 still finds the
+// chapter that prints 即為非住.
+const SAME_IN_PRINTINGS = { 則: '即', 恆: '恒', 闇: '暗', 遶: '繞' }
+const han = (text) => (text.match(/[一-鿿]/g) || []).map((c) => SAME_IN_PRINTINGS[c] ?? c).join('')
 const CHAPTER_HAN = CHAPTERS.map((c) => han(c.text))
 const WHOLE_HAN = CHAPTER_HAN.join('')
 const MOST_CHAPTERS = 2
@@ -221,8 +227,8 @@ export const DAILY_LINES = [
   ['應無所住而生其心。', 10],
   ['如來說：世界，非世界，是名世界。', 13],
   ['信心清淨，則生實相。', 14],
-  ['離一切諸相，則名諸佛。', 14],
-  ['若心有住，則為非住。', 14],
+  ['離一切諸相，即名諸佛。', 14],
+  ['若心有住，即為非住。', 14],
   ['若菩薩心不住法而行布施，如人有目，日光明照，見種種色。', 14],
   ['如來者，即諸法如義。', 17],
   ['一切法皆是佛法。', 17],
