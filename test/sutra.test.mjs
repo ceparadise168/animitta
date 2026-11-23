@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals'
-import { passagesFor, passageNote, DAILY_LINES, todaysLine, todaysLineReply } from '../lambda/sutra.mjs'
+import { passagesFor, passageNote, DAILY_LINES, todaysLine, todaysLineReply, lineAt, lineReply, askAboutLine, passageOf } from '../lambda/sutra.mjs'
 import { buildMessages } from '../lambda/prompt.mjs'
 import { EVERYDAY_MESSAGES } from './fixtures/everyday-messages.mjs'
 
@@ -150,6 +150,28 @@ describe("today's line", () => {
     const { chapter } = todaysLine(at('2026-11-23T09:00:00+08:00'))
     expect(titlesFor('這句是什麼意思', turns)).toEqual([chapter.title])
     expect(titlesFor('嗯 今天好累', turns)).toEqual([])
+  })
+})
+
+describe('the lines after the day\'s one', () => {
+  it('come without the 每日一句 title, still inviting a reply', () => {
+    const reply = lineReply(lineAt(3))
+    expect(reply).toBe(`「${DAILY_LINES[3][0]}」\n——〈如理實見分第五〉\n\n這句讓你想到什麼，都可以跟我說`)
+  })
+
+  it('go round: after the last comes the first', () => {
+    expect(lineAt(DAILY_LINES.length).line).toBe(DAILY_LINES[0][0])
+    expect(lineAt(-1).line).toBe(DAILY_LINES.at(-1)[0])
+  })
+
+  it('show the whole chapter as it reads when 多了解這一段 is pressed', () => {
+    const shown = lineAt(17)
+    expect(passageOf(shown)).toBe(`〈一體同觀分第十八〉原文：\n\n${shown.chapter.text}`)
+  })
+
+  it.each(DAILY_LINES.map((_, i) => [i]))('hand the model the right chapter when 多了解這一段 is pressed under line %d', (i) => {
+    const shown = lineAt(i)
+    expect(passagesFor(askAboutLine(shown))[0].chapter.title).toBe(shown.chapter.title)
   })
 })
 

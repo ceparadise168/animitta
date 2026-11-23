@@ -1,6 +1,6 @@
 import { describe, it, expect, jest, afterEach } from '@jest/globals'
 import { createHmac } from 'node:crypto'
-import { verifySignature, showLoadingIndicator, downloadContent } from '../lambda/line.mjs'
+import { verifySignature, showLoadingIndicator, downloadContent, replyMessage } from '../lambda/line.mjs'
 
 
 describe('verifySignature', () => {
@@ -90,5 +90,29 @@ describe('downloadContent', () => {
     global.fetch = jest.fn().mockResolvedValue({ status: 404 })
 
     await expect(downloadContent('m1', Date.now() + 5000)).rejects.toThrow('LINE content download failed: 404')
+  })
+})
+
+describe('replyMessage', () => {
+  afterEach(() => jest.restoreAllMocks())
+
+  it('sends several messages in one reply when given several texts', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true })
+
+    await replyMessage('tok', ['原文', '解釋'])
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.messages).toEqual([
+      { type: 'text', text: '原文' },
+      { type: 'text', text: '解釋' },
+    ])
+  })
+
+  it('sends one message for one text', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true })
+
+    await replyMessage('tok', '嗨')
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).messages).toEqual([{ type: 'text', text: '嗨' }])
   })
 })

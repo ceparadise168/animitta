@@ -242,19 +242,39 @@ export const DAILY_LINES = [
 const TAIPEI_OFFSET_MS = 8 * 3_600_000
 const DAY_MS = 86_400_000
 
+/** The line at a place in DAILY_LINES; past the last one it starts again. */
+export function lineAt(index) {
+  const at = ((index % DAILY_LINES.length) + DAILY_LINES.length) % DAILY_LINES.length
+  const [line, chapterNumber] = DAILY_LINES[at]
+  return { index: at, line, chapter: CHAPTERS[chapterNumber - 1] }
+}
+
 export function todaysLine(now = Date.now()) {
   const at = Number.isFinite(now) ? now : Date.now()
-  const day = Math.floor((at + TAIPEI_OFFSET_MS) / DAY_MS)
-  const [line, chapterNumber] = DAILY_LINES[((day % DAILY_LINES.length) + DAILY_LINES.length) % DAILY_LINES.length]
-  return { line, chapter: CHAPTERS[chapterNumber - 1] }
+  return lineAt(Math.floor((at + TAIPEI_OFFSET_MS) / DAY_MS))
+}
+
+// The day's line says what it is; the ones 再給一句 brings come bare.
+export function lineReply({ line, chapter }, { first = false } = {}) {
+  return first
+    ? `每日一句\n\n「${line}」\n——〈${chapter.title}〉\n\n不用急著懂它。這句讓你想到什麼，或今天有哪個念頭一直回來，都可以跟我說`
+    : `「${line}」\n——〈${chapter.title}〉\n\n這句讓你想到什麼，都可以跟我說`
 }
 
 export function todaysLineReply(now = Date.now()) {
-  const { line, chapter } = todaysLine(now)
-  return (
-    `每日一句\n\n「${line}」\n——〈${chapter.title}〉\n\n` +
-    '不用急著懂它。這句讓你想到什麼，或今天有哪個念頭一直回來，都可以跟我說'
-  )
+  return lineReply(todaysLine(now), { first: true })
+}
+
+// 多了解這一段 first shows the whole chapter as it reads, so the passage never
+// comes from the model: asked to retell it, the model mixed up who said what
+// in 4 of 8 tries (2026-11-23). Then the model explains it. The line goes into
+// the question as a quote, so the lookup above hands the model the chapter too.
+export function passageOf({ chapter }) {
+  return `〈${chapter.title}〉原文：\n\n${chapter.text}`
+}
+
+export function askAboutLine({ line, chapter }) {
+  return `想多了解這一句：「${line}」（${chapter.title}）。整段原文我看過了，不用重講經文內容，用白話講重點就好：這段在說什麼，這句在裡面是什麼意思？`
 }
 
 export function passageNote(passages) {

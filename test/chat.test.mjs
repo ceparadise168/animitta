@@ -17,13 +17,15 @@ jest.unstable_mockModule('../lambda/providers/index.mjs', () => ({
 }))
 
 const mockReplyMessage = jest.fn()
+const mockReplyWithQuickReply = jest.fn()
 jest.unstable_mockModule('../lambda/line.mjs', () => ({
   replyMessage: mockReplyMessage,
+  replyWithQuickReply: mockReplyWithQuickReply,
   verifySignature: jest.fn(),
   showLoadingIndicator: jest.fn().mockResolvedValue(undefined),
 }))
 
-const { handleText } = await import('../lambda/services/chat.mjs')
+const { handleText, replyAndRemember } = await import('../lambda/services/chat.mjs')
 
 describe('chat service', () => {
   const mockProvider = {
@@ -98,6 +100,15 @@ describe('chat service', () => {
       expect(onReplied).not.toHaveBeenCalled()
     })
 
+    it('sends a fixed message ahead of the answer when asked, and remembers both', async () => {
+      mockProvider.chatCompletion.mockResolvedValue({ text: '這段在講心抓不住' })
+
+      await handleText('user1', 'token1', '想多了解這一句', 1795270000000, { before: '〈一體同觀分第十八〉原文：…' })
+
+      expect(mockReplyMessage).toHaveBeenCalledWith('token1', ['〈一體同觀分第十八〉原文：…', '這段在講心抓不住'])
+      expect(mockSaveTurn).toHaveBeenCalledWith('user1', '想多了解這一句', '〈一體同觀分第十八〉原文：…\n\n這段在講心抓不住', 1795270000000)
+    })
+
     it('says which words went unanswered when the model fails', async () => {
       mockProvider.chatCompletion.mockRejectedValue(new Error('Anthropic chat failed: 529'))
 
@@ -118,6 +129,26 @@ describe('chat service', () => {
         unanswered: '我真的不想活了',
         cause: thrown,
       })
+    })
+  })
+
+  describe('replyAndRemember', () => {
+    it('puts buttons under the message when asked, and remembers the exchange', async () => {
+      mockReplyWithQuickReply.mockResolvedValue(undefined)
+      const buttons = [{ label: '再給一句', data: 'action=daily_line_next&line=3' }]
+
+      await replyAndRemember('user1', 'token1', '（按了「再給一句」）', '「應無所住而生其心。」', 1795270000000, { quickReply: buttons })
+
+      expect(mockReplyWithQuickReply).toHaveBeenCalledWith('token1', '「應無所住而生其心。」', buttons)
+      expect(mockReplyMessage).not.toHaveBeenCalled()
+      expect(mockSaveTurn).toHaveBeenCalledWith('user1', '（按了「再給一句」）', '「應無所住而生其心。」', 1795270000000)
+    })
+
+    it('sends a plain message when no buttons are asked for', async () => {
+      await replyAndRemember('user1', 'token1', '（按了選單的「隨意聊聊」）', '嗨', 1795270000000)
+
+      expect(mockReplyMessage).toHaveBeenCalledWith('token1', '嗨')
+      expect(mockReplyWithQuickReply).not.toHaveBeenCalled()
     })
   })
 })

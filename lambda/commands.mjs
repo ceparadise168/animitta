@@ -1,8 +1,8 @@
 import { replyMessage, replyWithQuickReply } from './line.mjs'
 import { clearMemory, RETENTION_DAYS } from './services/memory.mjs'
-import { replyAndRemember } from './services/chat.mjs'
+import { handleText, replyAndRemember } from './services/chat.mjs'
 import { VOICE_MINUTES_PER_MONTH } from './services/voice.mjs'
-import { todaysLineReply } from './sutra.mjs'
+import { DAILY_LINES, askAboutLine, lineAt, lineReply, passageOf, todaysLine } from './sutra.mjs'
 
 const CASUAL_CHAT_STARTERS = [
   '嗨，這邊很隨意，不用拘束\n\n想講最近煩你的事、一個轉不掉的念頭，或想問我金剛經裡的哪句話，都可以。不用先想好怎麼說，現在心裡最放不下的那件事，直接講出來就好',
@@ -47,6 +47,14 @@ export async function handlePostback(userId, replyToken, data, sentAt) {
   if (data === 'action=daily_line') {
     return handleTodaysLine(userId, replyToken, sentAt)
   }
+  const params = new URLSearchParams(data)
+  if (params.get('action') === 'daily_line_next') {
+    return handleNextLine(userId, replyToken, lineShown(params.get('line'), sentAt), sentAt)
+  }
+  if (params.get('action') === 'daily_line_more') {
+    const shown = lineShown(params.get('line'), sentAt)
+    return handleText(userId, replyToken, askAboutLine(shown), sentAt, { before: passageOf(shown) })
+  }
   if (data === 'confirm:clear') {
     try {
       await clearMemory(userId, sentAt)
@@ -67,10 +75,37 @@ async function handleCasualChat(userId, replyToken, sentAt) {
   return replyAndRemember(userId, replyToken, '（按了選單的「隨意聊聊」）', opener, sentAt)
 }
 
+// Under each 每日一句 message, two buttons: 多了解這一段 shows the whole chapter
+// as it reads, then the model explains it like a question the person typed; 再給一句
+// brings the next line in the sutra's order, so it is reading on, not a draw.
+// The buttons go only under these fixed lines, never under chat replies (the
+// suggestion buttons taken off on 2026-05-21 had people tapping instead of
+// thinking).
+const lineFollowUps = ({ index }) => [
+  { label: '多了解這一段', data: `action=daily_line_more&line=${index}` },
+  { label: '再給一句', data: `action=daily_line_next&line=${index}` },
+]
+
+// The line a button was under; an unreadable one means today's.
+function lineShown(written, sentAt) {
+  const index = /^\d+$/.test(written ?? '') ? Number(written) : NaN
+  return index < DAILY_LINES.length ? lineAt(index) : todaysLine(sentAt)
+}
+
 // Remembered like the casual-chat opener, so whatever the person says next is
 // answered as a reply to the line, with its chapter at hand if they ask.
 async function handleTodaysLine(userId, replyToken, sentAt) {
-  return replyAndRemember(userId, replyToken, '（按了選單的「每日一句」）', todaysLineReply(sentAt), sentAt)
+  const today = todaysLine(sentAt)
+  return replyAndRemember(userId, replyToken, '（按了選單的「每日一句」）', lineReply(today, { first: true }), sentAt, {
+    quickReply: lineFollowUps(today),
+  })
+}
+
+async function handleNextLine(userId, replyToken, shown, sentAt) {
+  const next = lineAt(shown.index + 1)
+  return replyAndRemember(userId, replyToken, '（按了「再給一句」）', lineReply(next), sentAt, {
+    quickReply: lineFollowUps(next),
+  })
 }
 
 async function handleClearMemory(replyToken) {

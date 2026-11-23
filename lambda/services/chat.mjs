@@ -1,7 +1,7 @@
 import { getContext, saveTurn, compressOldTurns, archiveSession } from './memory.mjs'
 import { getProvider } from '../providers/index.mjs'
 import { buildMessages } from '../prompt.mjs'
-import { replyMessage, showLoadingIndicator } from '../line.mjs'
+import { replyMessage, replyWithQuickReply, showLoadingIndicator } from '../line.mjs'
 
 function stripMarkdown(text) {
   return text.replace(/[*#_~`>]/g, '')
@@ -14,9 +14,11 @@ const answerWithin = (sentAt) => Math.max(5_000, sentAt + 55_000 - Date.now())
 
 /**
  * Answer the user's words. onReplied runs once the reply has reached LINE, so
- * a caller can tell a failure before the answer from one after it.
+ * a caller can tell a failure before the answer from one after it. before is
+ * a fixed message sent ahead of the model's answer in the same reply, such as
+ * a passage of the sutra, and is remembered with it.
  */
-export async function handleText(userId, replyToken, userText, sentAt, { onReplied } = {}) {
+export async function handleText(userId, replyToken, userText, sentAt, { onReplied, before } = {}) {
   const provider = getProvider()
 
   showLoadingIndicator(userId).catch((err) => console.warn(err.message))
@@ -28,14 +30,14 @@ export async function handleText(userId, replyToken, userText, sentAt, { onRepli
       signal: AbortSignal.timeout(answerWithin(sentAt)),
     })
     reply = stripMarkdown(text)
-    await replyMessage(replyToken, reply)
+    await replyMessage(replyToken, before ? [before, reply] : reply)
   } catch (err) {
     // Whoever apologises instead has to know what went unanswered.
     throw withUnanswered(err, userText)
   }
   onReplied?.()
 
-  await remember(userId, context, userText, reply, provider, sentAt)
+  await remember(userId, context, userText, before ? `${before}\n\n${reply}` : reply, provider, sentAt)
 }
 
 // Writing onto a frozen error or a thrown string would itself throw and hide
@@ -50,9 +52,10 @@ function withUnanswered(err, userText) {
 }
 
 // For a fixed bot line that the next message may answer, such as the
-// casual-chat opener. userSide records what the user did to get it.
-export async function replyAndRemember(userId, replyToken, userSide, reply, sentAt) {
-  await replyMessage(replyToken, reply)
+// casual-chat opener. userSide records what the user did to get it; quickReply
+// adds buttons under the message (LINE's Quick Reply).
+export async function replyAndRemember(userId, replyToken, userSide, reply, sentAt, { quickReply } = {}) {
+  await (quickReply ? replyWithQuickReply(replyToken, reply, quickReply) : replyMessage(replyToken, reply))
   await remember(userId, await getContext(userId), userSide, reply, getProvider(), sentAt)
 }
 

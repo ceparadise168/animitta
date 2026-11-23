@@ -16,13 +16,16 @@ jest.unstable_mockModule('../lambda/services/memory.mjs', () => ({
 }))
 
 const mockReplyAndRemember = jest.fn()
+const mockHandleText = jest.fn()
 jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({
   replyAndRemember: mockReplyAndRemember,
+  handleText: mockHandleText,
 }))
 
 jest.unstable_mockModule('../lambda/services/voice.mjs', () => ({ VOICE_MINUTES_PER_MONTH: 25 }))
 
 const { handleCommand, handlePostback, isCommand } = await import('../lambda/commands.mjs')
+const { DAILY_LINES, todaysLine } = await import('../lambda/sutra.mjs')
 
 describe('commands', () => {
   beforeEach(() => {
@@ -31,6 +34,7 @@ describe('commands', () => {
     mockReplyWithQuickReply.mockResolvedValue(undefined)
     mockClearMemory.mockResolvedValue(undefined)
     mockReplyAndRemember.mockResolvedValue(undefined)
+    mockHandleText.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -95,6 +99,58 @@ describe('commands', () => {
     expect([userId, replyToken, userSide]).toEqual(['user1', 'token1', '（按了選單的「每日一句」）'])
     expect(text).toMatch(/^每日一句\n\n「.+」\n——〈.+分第.+〉\n\n不用急著懂它/)
     expect(sentAt).toBe(Date.parse('2026-11-23T09:00:00+08:00'))
+  })
+
+  describe("the buttons under a line", () => {
+    const MORNING = Date.parse('2026-11-23T09:00:00+08:00')
+    const buttonsOf = (call) => call[5].quickReply
+
+    it("offers 多了解這一段 and 再給一句 under today's line, both pointing at it", async () => {
+      await handlePostback('user1', 'token1', 'action=daily_line', MORNING)
+
+      const { index } = todaysLine(MORNING)
+      expect(buttonsOf(mockReplyAndRemember.mock.calls[0])).toEqual([
+        { label: '多了解這一段', data: `action=daily_line_more&line=${index}` },
+        { label: '再給一句', data: `action=daily_line_next&line=${index}` },
+      ])
+    })
+
+    it('再給一句 brings the next line in the sutra\'s order, with the buttons again', async () => {
+      await handlePostback('user1', 'token1', 'action=daily_line_next&line=5', MORNING)
+
+      const call = mockReplyAndRemember.mock.calls[0]
+      expect(call[2]).toBe('（按了「再給一句」）')
+      expect(call[3]).toContain(`「${DAILY_LINES[6][0]}」`)
+      expect(call[3]).not.toMatch(/^每日一句/)
+      expect(buttonsOf(call).map((b) => b.data)).toEqual(['action=daily_line_more&line=6', 'action=daily_line_next&line=6'])
+    })
+
+    it('starts again from the first line after the last', async () => {
+      await handlePostback('user1', 'token1', `action=daily_line_next&line=${DAILY_LINES.length - 1}`, MORNING)
+
+      expect(mockReplyAndRemember.mock.calls[0][3]).toContain(`「${DAILY_LINES[0][0]}」`)
+    })
+
+    it('多了解這一段 shows the whole chapter, then asks the model about that line', async () => {
+      await handlePostback('user1', 'token1', 'action=daily_line_more&line=17', MORNING)
+
+      const [userId, replyToken, asked, sentAt, { before }] = mockHandleText.mock.calls[0]
+      expect([userId, replyToken, sentAt]).toEqual(['user1', 'token1', MORNING])
+      expect(asked).toContain(`「${DAILY_LINES[17][0]}」`)
+      expect(before).toMatch(/^〈一體同觀分第十八〉原文：\n\n/)
+      expect(before).toContain('過去心不可得，現在心不可得，未來心不可得。')
+      expect(mockReplyAndRemember).not.toHaveBeenCalled()
+    })
+
+    it.each(['action=daily_line_next&line=abc', 'action=daily_line_next&line=999', 'action=daily_line_next'])(
+      'goes on from today\'s line when it cannot tell which line the button was under (%s)',
+      async (data) => {
+        await handlePostback('user1', 'token1', data, MORNING)
+
+        const next = DAILY_LINES[(todaysLine(MORNING).index + 1) % DAILY_LINES.length][0]
+        expect(mockReplyAndRemember.mock.calls[0][3]).toContain(`「${next}」`)
+      },
+    )
   })
 
   it('recognises only the exact menu texts as commands', () => {

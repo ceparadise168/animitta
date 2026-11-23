@@ -52,6 +52,7 @@ export async function downloadContent(messageId, deadline) {
   }
 }
 
+// text is one message, or several (LINE takes up to five in one reply).
 export async function replyMessage(replyToken, text) {
   const res = await fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',
@@ -61,7 +62,7 @@ export async function replyMessage(replyToken, text) {
     },
     body: JSON.stringify({
       replyToken,
-      messages: [{ type: 'text', text }],
+      messages: [text].flat().map((t) => ({ type: 'text', text: t })),
     }),
   })
   if (!res.ok) throw new Error(`LINE reply failed: ${res.status}`)
