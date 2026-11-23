@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals'
-import { buildMessages, SYSTEM_PROMPT } from '../lambda/prompt.mjs'
+import { buildMessages, SYSTEM_PROMPT, realPeopleParagraph } from '../lambda/prompt.mjs'
 
 describe('buildMessages', () => {
   it('returns system prompt + demos + user when no summary or history', () => {
@@ -104,6 +104,19 @@ describe('SYSTEM_PROMPT', () => {
     expect(SYSTEM_PROMPT).toContain('金剛經是無相界的底色')
     expect(SYSTEM_PROMPT).toContain('引整句原文，適合')
     expect(SYSTEM_PROMPT).toContain('不適合：剛在抒發')
+  })
+
+  it('offers a way to real people once, when someone has been low for a while', () => {
+    expect(SYSTEM_PROMPT).toContain('找真人聊也是一條路')
+    expect(SYSTEM_PROMPT).toContain('一段對話最多提一次')
+  })
+
+  it('stops offering the free counselling for 15-45-year-olds once 2026 is over in Taipei', () => {
+    const lastMinute = realPeopleParagraph(Date.parse('2026-12-31T23:59:00+08:00'))
+    const newYear = realPeopleParagraph(Date.parse('2027-01-01T00:00:00+08:00'))
+    expect(lastMinute).toContain('心理健康支持方案')
+    expect(newYear).not.toContain('心理健康支持方案')
+    expect(newYear).toContain('社區心理衛生中心')
   })
 
   it('gives the two 24-hour suicide hotlines first, and says when 1980 is closed', () => {
