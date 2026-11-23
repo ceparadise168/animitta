@@ -53,9 +53,91 @@ function quotedIn(text) {
   return []
 }
 
-/** The chapters the model should read before answering this message. */
-export function passagesFor(userText) {
-  return quotedIn(userText).slice(0, MOST_CHAPTERS)
+// 第十四分, 第 14 分 or 離相寂滅分: asked by chapter. 第三分鐘 and 第二分店 are not.
+const CHAPTER_NUMBER = /第\s*([一二三四五六七八九十]{1,3}|\d{1,2})\s*分(.?)/g
+const NOT_A_CHAPTER = /[鐘鍾之店局隊行院處區]/
+const ASKING_ABOUT_IT = /^([在講說是的嗎呢？?，,。！!\s]|)$/
+const DIGITS = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+
+function chapterNumber(written) {
+  if (/^\d+$/.test(written)) return Number(written)
+  const parts = written.split('十')
+  if (parts.length === 1) return DIGITS[written] ?? NaN
+  if (parts.length > 2) return NaN
+  const [tens, ones] = parts
+  return (tens ? DIGITS[tens] ?? NaN : 1) * 10 + (ones ? DIGITS[ones] ?? NaN : 0)
+}
+
+function byChapterName(text) {
+  const aboutSutra = ABOUT_THE_SUTRA.test(text)
+  const byNumber = [...text.matchAll(CHAPTER_NUMBER)]
+    .filter(([, , next]) => !NOT_A_CHAPTER.test(next) && (aboutSutra || ASKING_ABOUT_IT.test(next)))
+    .map(([, written]) => CHAPTERS[chapterNumber(written) - 1])
+    .filter(Boolean)
+  const byTitle = CHAPTERS.filter((c) => text.includes(c.title.replace(/分第.+$/, '')))
+  return [...byNumber, ...byTitle].map((chapter) => ({ chapter, why: `他問的是〈${chapter.title}〉` }))
+}
+
+// Asked by topic. A word that is also everyday talk (忍辱負重, 去廟裡布施)
+// counts only next to a word about the sutra; names and terms of the sutra
+// count on their own.
+const TOPICS = [
+  { words: /須菩提/, chapters: [2], alone: true, note: '須菩提是佛的弟子，經裡向佛提問的人，第一次開口在這一分' },
+  { words: /燃燈佛|然燈佛|授記/, chapters: [10, 17], alone: true },
+  { words: /歌利王/, chapters: [14], alone: true },
+  {
+    words: /四句偈/,
+    chapters: [26, 32],
+    alone: true,
+    note: '經裡好幾分都說「乃至四句偈等」，沒有指明是哪四句；一般常舉的是下面兩首偈，兩首在經裡各只出現一次',
+  },
+  { words: /一合相/, chapters: [30], alone: true },
+  { words: /五眼/, chapters: [18], alone: true },
+  { words: /忍辱/, chapters: [14] },
+  { words: /筏/, chapters: [6] },
+  { words: /四相|我相人相|眾生相|壽者相/, chapters: [3] },
+  { words: /布施/, chapters: [4] },
+  { words: /微塵/, chapters: [30] },
+  { words: /開頭|一開始|第一段/, chapters: [1] },
+  { words: /結尾|最後一段|最後那段|最後一分|最後面/, chapters: [32] },
+  { words: /經名|為什麼叫/, chapters: [13] },
+]
+
+function byTopic(text) {
+  const aboutSutra = ABOUT_THE_SUTRA.test(text)
+  return TOPICS.filter(({ words, alone }) => words.test(text) && (alone || aboutSutra)).flatMap(({ words, chapters, note }) =>
+    chapters.map((n) => ({
+      chapter: CHAPTERS[n - 1],
+      why: `他問的「${text.match(words)[0]}」${note ? `：${note}。這段` : ''}在〈${CHAPTERS[n - 1].title}〉`,
+    })),
+  )
+}
+
+// 這句出自哪裡, 什麼意思, 看不懂: asking about a line the bot just quoted,
+// such as today's line. Only quotes of six characters or more that are in the
+// sutra count, so the user's own words in quotes (「只能這樣」) do not.
+const REFERS_BACK = /這句|那句|這段|那段|出處|原文|出自|哪一分|第幾分|哪一段|哪裡來|在哪裡|什麼意思|不懂|怎麼解釋|在講什麼|在說什麼/
+
+function referredBack(text, lastReply) {
+  if (!lastReply || !REFERS_BACK.test(text)) return []
+  return [...lastReply.matchAll(/「([^」]+)」/g)]
+    .map(([, quote]) => han(quote))
+    .filter((words) => words.length >= 6)
+    .flatMap((words) => CHAPTERS.filter((_, i) => CHAPTER_HAN[i].includes(words)).slice(0, 1))
+    .map((chapter) => ({ chapter, why: `他問的是你剛剛引的那句，出自〈${chapter.title}〉` }))
+}
+
+/**
+ * The chapters the model should read before answering this message: the ones
+ * it quotes, names or asks about, or the one a line the bot just quoted is from.
+ */
+export function passagesFor(userText, recentTurns = []) {
+  const last = recentTurns.at(-1)
+  const lastReply = last?.role === 'assistant' ? last.content : ''
+  const seen = new Set()
+  return [...quotedIn(userText), ...byChapterName(userText), ...referredBack(userText, lastReply), ...byTopic(userText)]
+    .filter(({ chapter }) => !seen.has(chapter.title) && seen.add(chapter.title))
+    .slice(0, MOST_CHAPTERS)
 }
 
 export function passageNote(passages) {
