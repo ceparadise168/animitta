@@ -28,7 +28,7 @@ const ABOUT_MESSAGE =
 
 const COMMANDS = {
   '@隨意聊聊': (userId, replyToken, sentAt) => handleCasualChat(userId, replyToken, sentAt),
-  '@今天的一句': (userId, replyToken, sentAt) => handleTodaysLine(userId, replyToken, sentAt),
+  '@每日一句': (userId, replyToken, sentAt) => handleTodaysLine(userId, replyToken, sentAt),
   '@清除記憶': (userId, replyToken) => handleClearMemory(replyToken),
   '@關於': (userId, replyToken) => replyMessage(replyToken, ABOUT_MESSAGE),
 }
@@ -70,7 +70,7 @@ async function handleCasualChat(userId, replyToken, sentAt) {
 // Remembered like the casual-chat opener, so whatever the person says next is
 // answered as a reply to the line, with its chapter at hand if they ask.
 async function handleTodaysLine(userId, replyToken, sentAt) {
-  return replyAndRemember(userId, replyToken, '（按了選單的「今天的一句」）', todaysLineReply(sentAt), sentAt)
+  return replyAndRemember(userId, replyToken, '（按了選單的「每日一句」）', todaysLineReply(sentAt), sentAt)
 }
 
 async function handleClearMemory(replyToken) {

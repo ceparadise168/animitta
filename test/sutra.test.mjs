@@ -144,7 +144,7 @@ describe("today's line", () => {
 
   it('finds its chapter when the person asks about it next', () => {
     const turns = [
-      { role: 'user', content: '（按了選單的「今天的一句」）' },
+      { role: 'user', content: '（按了選單的「每日一句」）' },
       { role: 'assistant', content: todaysLineReply(at('2026-11-23T09:00:00+08:00')) },
     ]
     const { chapter } = todaysLine(at('2026-11-23T09:00:00+08:00'))

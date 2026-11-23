@@ -204,7 +204,7 @@ export function passagesFor(userText, recentTurns = []) {
     .slice(0, MOST_CHAPTERS)
 }
 
-// 今天的一句: on a Taipei day everyone gets the same line, going through the
+// 每日一句: on a Taipei day everyone gets the same line, going through the
 // sutra in order, so pressing again is never a fresh draw (that would be
 // 抽籤). Each line is the text word for word, with its chapter. Lines that read
 // as a rebuke when shown alone are left out (是人行邪道, and the two that call
@@ -252,7 +252,7 @@ export function todaysLine(now = Date.now()) {
 export function todaysLineReply(now = Date.now()) {
   const { line, chapter } = todaysLine(now)
   return (
-    `今天的一句\n\n「${line}」\n——〈${chapter.title}〉\n\n` +
+    `每日一句\n\n「${line}」\n——〈${chapter.title}〉\n\n` +
     '不用急著懂它。這句讓你想到什麼，或今天有哪個念頭一直回來，都可以跟我說'
   )
 }
