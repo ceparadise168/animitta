@@ -119,10 +119,14 @@ describe('SYSTEM_PROMPT', () => {
     expect(newYear).toContain('社區心理衛生中心')
   })
 
-  it('gives the two 24-hour suicide hotlines first, and says when 1980 is closed', () => {
-    expect(SYSTEM_PROMPT).toContain('1925 安心專線和 1995 生命線，兩支都 24 小時有人接')
-    expect(SYSTEM_PROMPT).toContain('1980 張老師不是 24 小時')
+  it('gives the two 24-hour suicide hotlines first, without promising someone always picks up', () => {
+    expect(SYSTEM_PROMPT).toContain('1925 安心專線和 1995 生命線，兩支 24 小時都可以打，一支打不通就換另一支')
     const demos = buildMessages({ summary: null, recentTurns: [], userInput: '嗨' })[1].content
-    expect(demos).toContain('1925 安心專線、1995 生命線，24 小時都有人接')
+    expect(demos).toContain('1925 安心專線、1995 生命線，24 小時都可以打，一支打不通就換另一支')
+    expect(SYSTEM_PROMPT + demos).not.toContain('都有人接')
+  })
+
+  it('says when 1980 answers, breaks included', () => {
+    expect(SYSTEM_PROMPT).toContain('1980 張老師只有部分時段有人接（週一到六 9 到 12 點、14 到 17 點、18 點到晚上九點半，週日 9 到 12 點、14 到 17 點）')
   })
 })
