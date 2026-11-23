@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals'
-import { passagesFor, passageNote } from '../lambda/sutra.mjs'
+import { passagesFor, passageNote, DAILY_LINES, todaysLine, todaysLineReply } from '../lambda/sutra.mjs'
 import { buildMessages } from '../lambda/prompt.mjs'
 import { EVERYDAY_MESSAGES } from './fixtures/everyday-messages.mjs'
 
@@ -79,6 +79,37 @@ describe('passagesFor', () => {
     it('ignores the person’s own words in quotes', () => {
       expect(titlesFor('這句是什麼意思', turns('你剛剛說「只能這樣過下去」，聽起來很累'))).toEqual([])
     })
+  })
+})
+
+describe("today's line", () => {
+  const at = (iso) => Date.parse(iso)
+
+  it('is the same all day in Taipei, however often it is pressed', () => {
+    expect(todaysLine(at('2026-11-23T00:00:00+08:00'))).toEqual(todaysLine(at('2026-11-23T23:59:59+08:00')))
+  })
+
+  it('moves on at midnight Taipei time, not UTC', () => {
+    expect(todaysLine(at('2026-11-23T23:59:59+08:00'))).not.toEqual(todaysLine(at('2026-11-24T00:00:00+08:00')))
+    expect(todaysLine(at('2026-11-24T07:59:59+08:00'))).toEqual(todaysLine(at('2026-11-24T00:00:00+08:00')))
+  })
+
+  it('goes through every line, in the sutra’s order, before coming back', () => {
+    const days = DAILY_LINES.length
+    const start = at('2026-11-23T12:00:00+08:00')
+    const lines = Array.from({ length: days }, (_, d) => todaysLine(start + d * 86_400_000).line)
+    expect(new Set(lines).size).toBe(days)
+    expect(todaysLine(start + days * 86_400_000).line).toBe(lines[0])
+  })
+
+  it('finds its chapter when the person asks about it next', () => {
+    const turns = [
+      { role: 'user', content: '（按了選單的「今天的一句」）' },
+      { role: 'assistant', content: todaysLineReply(at('2026-11-23T09:00:00+08:00')) },
+    ]
+    const { chapter } = todaysLine(at('2026-11-23T09:00:00+08:00'))
+    expect(titlesFor('這句是什麼意思', turns)).toEqual([chapter.title])
+    expect(titlesFor('嗯 今天好累', turns)).toEqual([])
   })
 })
 

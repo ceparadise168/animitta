@@ -22,7 +22,7 @@ jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({
 
 jest.unstable_mockModule('../lambda/services/voice.mjs', () => ({ VOICE_MINUTES_PER_MONTH: 25 }))
 
-const { handleCommand, isCommand } = await import('../lambda/commands.mjs')
+const { handleCommand, handlePostback, isCommand } = await import('../lambda/commands.mjs')
 
 describe('commands', () => {
   beforeEach(() => {
@@ -85,8 +85,20 @@ describe('commands', () => {
   })
 
 
+  it.each([
+    ['the menu button', () => handlePostback('user1', 'token1', 'action=daily_line', Date.parse('2026-11-23T09:00:00+08:00'))],
+    ['the typed command', () => handleCommand('user1', 'token1', '@今天的一句', Date.parse('2026-11-23T09:00:00+08:00'))],
+  ])("gives today's line from %s and remembers it, so the next message answers it", async (_, press) => {
+    await press()
+
+    const [userId, replyToken, userSide, text, sentAt] = mockReplyAndRemember.mock.calls[0]
+    expect([userId, replyToken, userSide]).toEqual(['user1', 'token1', '（按了選單的「今天的一句」）'])
+    expect(text).toMatch(/^今天的一句\n\n「.+」\n——〈.+分第.+〉\n\n不用急著懂它/)
+    expect(sentAt).toBe(Date.parse('2026-11-23T09:00:00+08:00'))
+  })
+
   it('recognises only the exact menu texts as commands', () => {
-    expect(['@隨意聊聊', '@清除記憶', '@關於'].every(isCommand)).toBe(true)
+    expect(['@隨意聊聊', '@今天的一句', '@清除記憶', '@關於'].every(isCommand)).toBe(true)
     expect(isCommand('@_@ 今天好累')).toBe(false)
     expect(isCommand('@關於 你是誰')).toBe(false)
     expect(isCommand('toString')).toBe(false)

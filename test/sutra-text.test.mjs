@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@jest/globals'
 import { readFileSync } from 'node:fs'
 import { SYSTEM_PROMPT } from '../lambda/prompt.mjs'
+import { DAILY_LINES } from '../lambda/sutra.mjs'
 
 // Every sutra line the bot is given or says on its own must be the text itself:
 // the prompt rule says a quoted line comes word for word from the library, so a
@@ -30,6 +31,16 @@ describe('the scripture library in the prompt', () => {
 
   it.each(entries)('quotes "%s" word for word, from the chapter it names', (line, title) => {
     expect(chapterOf(line)?.title).toBe(title)
+  })
+})
+
+describe("today's lines", () => {
+  it.each(DAILY_LINES)('quotes "%s" word for word from chapter %d', (line, chapterNumber) => {
+    expect(han(chapters[chapterNumber - 1].text)).toContain(han(line))
+  })
+
+  it('are long enough to be found again when someone asks about one', () => {
+    for (const [line] of DAILY_LINES) expect(han(line).length).toBeGreaterThanOrEqual(6)
   })
 })
 

@@ -2,6 +2,7 @@ import { replyMessage, replyWithQuickReply } from './line.mjs'
 import { clearMemory, RETENTION_DAYS } from './services/memory.mjs'
 import { replyAndRemember } from './services/chat.mjs'
 import { VOICE_MINUTES_PER_MONTH } from './services/voice.mjs'
+import { todaysLineReply } from './sutra.mjs'
 
 const CASUAL_CHAT_STARTERS = [
   '嗨，這邊很隨意，不用拘束\n\n想講最近煩你的事、一個轉不掉的念頭，或想問我金剛經裡的哪句話，都可以。不用先想好怎麼說，現在心裡最放不下的那件事，直接講出來就好',
@@ -27,6 +28,7 @@ const ABOUT_MESSAGE =
 
 const COMMANDS = {
   '@隨意聊聊': (userId, replyToken, sentAt) => handleCasualChat(userId, replyToken, sentAt),
+  '@今天的一句': (userId, replyToken, sentAt) => handleTodaysLine(userId, replyToken, sentAt),
   '@清除記憶': (userId, replyToken) => handleClearMemory(replyToken),
   '@關於': (userId, replyToken) => replyMessage(replyToken, ABOUT_MESSAGE),
 }
@@ -41,6 +43,9 @@ export async function handleCommand(userId, replyToken, command, sentAt) {
 export async function handlePostback(userId, replyToken, data, sentAt) {
   if (data === 'action=casual_chat') {
     return handleCasualChat(userId, replyToken, sentAt)
+  }
+  if (data === 'action=daily_line') {
+    return handleTodaysLine(userId, replyToken, sentAt)
   }
   if (data === 'confirm:clear') {
     try {
@@ -60,6 +65,12 @@ async function handleCasualChat(userId, replyToken, sentAt) {
   const opener =
     CASUAL_CHAT_STARTERS[Math.floor(Math.random() * CASUAL_CHAT_STARTERS.length)]
   return replyAndRemember(userId, replyToken, '（按了選單的「隨意聊聊」）', opener, sentAt)
+}
+
+// Remembered like the casual-chat opener, so whatever the person says next is
+// answered as a reply to the line, with its chapter at hand if they ask.
+async function handleTodaysLine(userId, replyToken, sentAt) {
+  return replyAndRemember(userId, replyToken, '（按了選單的「今天的一句」）', todaysLineReply(sentAt), sentAt)
 }
 
 async function handleClearMemory(replyToken) {

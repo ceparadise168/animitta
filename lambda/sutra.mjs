@@ -140,6 +140,59 @@ export function passagesFor(userText, recentTurns = []) {
     .slice(0, MOST_CHAPTERS)
 }
 
+// 今天的一句: on a Taipei day everyone gets the same line, going through the
+// sutra in order, so pressing again is never a fresh draw (that would be
+// 抽籤). Each line is the text word for word, with its chapter; lines that read
+// as a rebuke out of context (是人行邪道) are left out.
+export const DAILY_LINES = [
+  ['飯食訖，收衣缽，洗足已，敷座而坐。', 1],
+  ['應云何住？云何降伏其心？', 2],
+  ['菩薩於法，應無所住，行於布施。', 4],
+  ['菩薩應如是布施，不住於相。', 4],
+  ['凡所有相，皆是虛妄。若見諸相非相，即見如來。', 5],
+  ['知我說法，如筏喻者，法尚應捨，何況非法。', 6],
+  ['一切賢聖，皆以無為法而有差別。', 7],
+  ['所謂佛法者，即非佛法。', 8],
+  ['莊嚴佛土者，即非莊嚴，是名莊嚴。', 10],
+  ['應無所住而生其心。', 10],
+  ['如來說：世界，非世界，是名世界。', 13],
+  ['信心清淨，則生實相。', 14],
+  ['離一切諸相，則名諸佛。', 14],
+  ['若心有住，則為非住。', 14],
+  ['若菩薩心不住法而行布施，如人有目，日光明照，見種種色。', 14],
+  ['如來者，即諸法如義。', 17],
+  ['一切法皆是佛法。', 17],
+  ['過去心不可得，現在心不可得，未來心不可得。', 18],
+  ['諸心皆為非心，是名為心。', 18],
+  ['說法者，無法可說，是名說法。', 21],
+  ['是法平等，無有高下。', 23],
+  ['以無我、無人、無眾生、無壽者，修一切善法。', 23],
+  ['如來說有我者，則非有我，而凡夫之人以為有我。', 25],
+  ['於法不說斷滅相。', 27],
+  ['菩薩所作福德，不應貪著。', 28],
+  ['如來者，無所從來，亦無所去，故名如來。', 29],
+  ['一合相者，則是不可說；但凡夫之人貪著其事。', 30],
+  ['於一切法，應如是知，如是見，如是信解，不生法相。', 31],
+  ['不取於相，如如不動。', 32],
+  ['一切有為法，如夢幻泡影，如露亦如電，應作如是觀。', 32],
+]
+
+const TAIPEI_OFFSET_MS = 8 * 3_600_000
+const DAY_MS = 86_400_000
+
+export function todaysLine(now = Date.now()) {
+  const [line, chapterNumber] = DAILY_LINES[Math.floor((now + TAIPEI_OFFSET_MS) / DAY_MS) % DAILY_LINES.length]
+  return { line, chapter: CHAPTERS[chapterNumber - 1] }
+}
+
+export function todaysLineReply(now = Date.now()) {
+  const { line, chapter } = todaysLine(now)
+  return (
+    `今天的一句\n\n「${line}」\n——〈${chapter.title}〉\n\n` +
+    '不用急著懂它。這句讓你想到什麼，或今天有哪個念頭一直回來，都可以跟我說'
+  )
+}
+
 export function passageNote(passages) {
   return (
     '（內部參考，不要念給他聽：他這句話提到的經文，程式查到的出處如下。講出處、上下文時以這段原文為準，不要憑印象。' +
