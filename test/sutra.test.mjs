@@ -38,9 +38,23 @@ describe('passagesFor', () => {
     expect(titlesFor(text)).toEqual(titles)
   })
 
-  it.each(['再等我第三分鐘', '第二分店在哪', '拿了第一分之後就輸了'])('does not read "%s" as a chapter', (text) => {
-    expect(titlesFor(text)).toEqual([])
+  it.each([
+    ['金剛經第十四章在講什麼', ['離相寂滅分第十四']],
+    ['金剛經第14品在講什麼', ['離相寂滅分第十四']],
+    ['金剛經十四分在講什麼', ['離相寂滅分第十四']],
+    ['第１４分是什麼', ['離相寂滅分第十四']],
+    ['第卅二分在講什麼', ['應化非真分第三十二']],
+    ['第十四分跟第十五分差在哪', ['離相寂滅分第十四', '持經功德分第十五']],
+  ])('finds the chapter however "%s" writes it', (text, titles) => {
+    expect(titlesFor(text)).toEqual(titles)
   })
+
+  it.each(['再等我第三分鐘', '第二分店在哪', '拿了第一分之後就輸了', '金剛經讓我十分感動', '金剛經我才讀了三分之一'])(
+    'does not read "%s" as a chapter',
+    (text) => {
+      expect(titlesFor(text)).toEqual([])
+    },
+  )
 
   it.each([
     ['金剛經怎麼講忍辱', ['離相寂滅分第十四']],
@@ -49,11 +63,25 @@ describe('passagesFor', () => {
     ['金剛經的結尾在講什麼', ['應化非真分第三十二']],
     ['金剛經開頭在講什麼', ['法會因由分第一']],
     ['金剛經裡的筏是什麼比喻', ['正信希有分第六']],
+    ['金剛經的最後一句是什麼', ['應化非真分第三十二']],
+    ['金剛經的第一句是什麼', ['法會因由分第一']],
+    ['金剛經哪裡說到恆河沙', ['無為福勝分第十一']],
+    ['金剛經怎麼說無為法', ['無得無說分第七']],
+    ['金剛經的無我是什麼', ['究竟無我分第十七']],
+    ['金剛經講的無相是什麼意思', ['如理實見分第五']],
+    ['金剛經的六如偈', ['應化非真分第三十二']],
+    ['筏喻是什麼意思', ['正信希有分第六']],
+    ['無所住是什麼意思', ['莊嚴淨土分第十', '妙行無住分第四']],
+    ['金剛經裡須菩提為什麼哭', ['離相寂滅分第十四']],
+    ['五眼是什麼', ['一體同觀分第十八']],
+    ['離相寂滅那一分在講什麼', ['離相寂滅分第十四']],
+    ['如是我聞是什麼意思', ['法會因由分第一']],
+    ['信受奉行是什麼意思', ['應化非真分第三十二']],
   ])('finds the chapter for the topic in "%s"', (text, titles) => {
     expect(titlesFor(text)).toEqual(titles)
   })
 
-  it.each(['我一直在忍辱負重', '我相信你', '我相信金剛經會有幫助', '最近去廟裡布施了一點錢', '這部電影的結尾好感人'])(
+  it.each(['我一直在忍辱負重', '我相信你', '我相信金剛經會有幫助', '最近去廟裡布施了一點錢', '這部電影的結尾好感人', '無相界跟金剛經有什麼關係'])(
     'leaves the everyday use of a topic word alone: "%s"',
     (text) => {
       expect(titlesFor(text)).toEqual([])
@@ -67,14 +95,16 @@ describe('passagesFor', () => {
     ]
     const quoted = turns('我想到一句：「過去心不可得，現在心不可得，未來心不可得。」不用急著懂它')
 
-    it('finds the chapter of the quote', () => {
-      expect(titlesFor('這句出自哪裡', quoted)).toEqual(['一體同觀分第十八'])
-      expect(titlesFor('什麼意思', quoted)).toEqual(['一體同觀分第十八'])
+    it.each(['這句出自哪裡', '什麼意思', '我看不懂', '這段話是什麼意思？'])('finds the chapter of the quote for "%s"', (text) => {
+      expect(titlesFor(text, quoted)).toEqual(['一體同觀分第十八'])
     })
 
-    it('needs the person to be asking about it', () => {
-      expect(titlesFor('嗯嗯', quoted)).toEqual([])
-    })
+    it.each(['嗯嗯', '我老闆那段話到底什麼意思', '他說的這句話是什麼意思', '我不懂我媽為什麼要這樣對我', '你在哪裡 我好想找人講話', '這段時間真的好累', '我看不懂這份合約'])(
+      'needs the person to be asking about it, not "%s"',
+      (text) => {
+        expect(titlesFor(text, quoted)).toEqual([])
+      },
+    )
 
     it('ignores the person’s own words in quotes', () => {
       expect(titlesFor('這句是什麼意思', turns('你剛剛說「只能這樣過下去」，聽起來很累'))).toEqual([])

@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs'
 
-// 金剛經全文：鳩摩羅什譯，江味農校定本（維基文庫），32 分。
+// 金剛經全文：鳩摩羅什譯，32 分，取自維基文庫。That page calls itself 江味農
+// 校定本, but checked against 江味農's own collation notes and CBETA T0235
+// (2026-11-23) it follows the circulated text in about 60 places, so which
+// edition to keep is for someone who recites the sutra to confirm.
+//
 // The whole text is looked up here instead of sitting in the prompt. With all
 // of it in the prompt the model got 3 of 6 questions about where a line is
 // and what surrounds it right, at twice the input; given only the chapter the
@@ -10,31 +14,37 @@ export const CHAPTERS = JSON.parse(readFileSync(new URL('./diamond-sutra.json', 
 const han = (text) => (text.match(/[一-鿿]/g) || []).join('')
 const CHAPTER_HAN = CHAPTERS.map((c) => han(c.text))
 const WHOLE_HAN = CHAPTER_HAN.join('')
-
-// Four characters in a row is the shortest piece that reads as a quote
-// (法尚應捨, 如筏喻者), and a message rarely needs more than two chapters.
-const SHORTEST_QUOTE = 4
-const LONGEST_LOOKED_FOR = 20
 const MOST_CHAPTERS = 2
 
-// These everyday sayings also occur in the sutra, so on their own they are
-// small talk: 太不可思議了, 結果皆大歡喜. They count only when the message is
-// plainly about the sutra. A four-character piece built on 須菩提 is the name
-// being mentioned, not a quote.
-const EVERYDAY_SAYINGS = ['不可思議', '皆大歡喜', '大千世界', '夢幻泡影', '一切眾生']
-export const ABOUT_THE_SUTRA = /金剛經|經文|經裡|經中|經上|這部經|佛經|原文|出處|哪一分|第幾分|哪一段|佛說|佛陀/
+// Words that say the message is about the sutra. 經上, 經中 and 經裡 count
+// unless they end another word: 已經上班, 曾經中獎, 神經裡.
+export const ABOUT_THE_SUTRA =
+  /金剛經|佛經|這部經|(?<![已曾神歷財政途必正取])經(文|裡|中|上)|哪一分(?!鐘)|第幾分(?!鐘)|佛說|佛陀/
+
+// Five characters of the sutra in a row read as a quote. Four do only for its
+// best-known short phrases, or when the message is plainly about the sutra:
+// many four-character runs of it are everyday Chinese (世界所有, 如是如是,
+// 不可思議, 皆大歡喜). A four-character piece built on 須菩提 is the name.
+const SHORTEST_LOOKED_FOR = 4
+const SHORTEST_QUOTE = 5
+const LONGEST_LOOKED_FOR = 20
+const FAMOUS_SHORT_QUOTES = [
+  '法尚應捨', '何況非法', '如筏喻者', '凡所有相', '皆是虛妄', '諸相非相', '即見如來', '如如不動',
+  '不取於相', '降伏其心', '應無所住', '無法可說', '是名說法', '即非莊嚴', '是名莊嚴', '即非佛法',
+  '如是我聞', '信受奉行',
+]
 
 function countsAsQuote(piece, aboutSutra) {
-  if (piece.length > SHORTEST_QUOTE) return true
+  if (piece.length >= SHORTEST_QUOTE) return true
   if (piece.includes('須菩提')) return false
-  return aboutSutra || !EVERYDAY_SAYINGS.includes(piece)
+  return aboutSutra || FAMOUS_SHORT_QUOTES.includes(piece)
 }
 
 // The longest runs of the user's words that occur in the sutra, one per chapter.
 function quotedIn(text) {
   const words = han(text)
   const aboutSutra = ABOUT_THE_SUTRA.test(text)
-  for (let length = Math.min(words.length, LONGEST_LOOKED_FOR); length >= SHORTEST_QUOTE; length--) {
+  for (let length = Math.min(words.length, LONGEST_LOOKED_FOR); length >= SHORTEST_LOOKED_FOR; length--) {
     const found = new Map()
     for (let i = 0; i + length <= words.length; i++) {
       const piece = words.slice(i, i + length)
@@ -53,37 +63,56 @@ function quotedIn(text) {
   return []
 }
 
-// 第十四分, 第 14 分 or 離相寂滅分: asked by chapter. 第三分鐘 and 第二分店 are not.
-const CHAPTER_NUMBER = /第\s*([一二三四五六七八九十]{1,3}|\d{1,2})\s*分(.?)/g
-const NOT_A_CHAPTER = /[鐘鍾之店局隊行院處區]/
-const ASKING_ABOUT_IT = /^([在講說是的嗎呢？?，,。！!\s]|)$/
+// Asked by chapter: 第十四分, 第 14 分, 離相寂滅分, and next to a word about the
+// sutra also 金剛經第十四章 or 金剛經十四品. Without such a word, a bare 第N分
+// counts only when the message opens with it and asks about it
+// (第十四分在講什麼), or names two chapters: 拿到第一分 and 第二分的時候 are
+// scores, and 第三分鐘, 第二分店 and 三分之一 are not chapters at all.
+const CHAPTER_REF = /(第)?\s*([一二三四五六七八九十廿卅]{1,3}|\d{1,2})\s*(分|章|品)(?![鐘鍾之店局隊行院處區數])/g
+const OPENS_WITH_A_CHAPTER = /^\s*(那|請問|想問|問一下|欸|所以)?\s*第/
+const ASKS_ABOUT_IT = /^\s*(在講|講什麼|講的|在說|說什麼|說的|是什麼|是在|的意思|的內容|的重點|的原文|原文|呢|嗎|[？?]|$)/
 const DIGITS = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
 
 function chapterNumber(written) {
   if (/^\d+$/.test(written)) return Number(written)
-  const parts = written.split('十')
-  if (parts.length === 1) return DIGITS[written] ?? NaN
+  const parts = written.replace('廿', '二十').replace('卅', '三十').split('十')
+  if (parts.length === 1) return DIGITS[parts[0]] ?? NaN
   if (parts.length > 2) return NaN
   const [tens, ones] = parts
   return (tens ? DIGITS[tens] ?? NaN : 1) * 10 + (ones ? DIGITS[ones] ?? NaN : 0)
 }
 
 function byChapterName(text) {
-  const aboutSutra = ABOUT_THE_SUTRA.test(text)
-  const byNumber = [...text.matchAll(CHAPTER_NUMBER)]
-    .filter(([, , next]) => !NOT_A_CHAPTER.test(next) && (aboutSutra || ASKING_ABOUT_IT.test(next)))
-    .map(([, written]) => CHAPTERS[chapterNumber(written) - 1])
+  const plain = text.replace(/[０-９]/g, (d) => String(d.charCodeAt(0) - 0xff10))
+  const aboutSutra = ABOUT_THE_SUTRA.test(plain)
+  const refs = [...plain.matchAll(CHAPTER_REF)]
+  const firstChapterAt = plain.indexOf('第')
+  const twoChapters = refs.filter(([, di, , unit]) => di && unit === '分').length >= 2
+  const asksAfter = (all, index) => ASKS_ABOUT_IT.test(plain.slice(index + all.length))
+  // Without 第, 十分 is "very" (金剛經讓我十分感動), so it has to be asked about.
+  const isAChapter = ({ 0: all, 1: di, 3: unit, index }) => {
+    if (aboutSutra) return Boolean(di) || asksAfter(all, index)
+    if (!di || unit !== '分') return false
+    return twoChapters || (OPENS_WITH_A_CHAPTER.test(plain) && index === firstChapterAt && asksAfter(all, index))
+  }
+  const byNumber = refs
+    .filter(isAChapter)
+    .map(([, , written]) => CHAPTERS[chapterNumber(written) - 1])
     .filter(Boolean)
-  const byTitle = CHAPTERS.filter((c) => text.includes(c.title.replace(/分第.+$/, '')))
+  const byTitle = CHAPTERS.filter((c) => {
+    const name = c.title.replace(/分第.+$/, '')
+    return [`${name}分`, `${name}那一分`, `${name}這一分`].some((n) => plain.includes(n)) || (aboutSutra && plain.includes(name))
+  })
   return [...byNumber, ...byTitle].map((chapter) => ({ chapter, why: `他問的是〈${chapter.title}〉` }))
 }
 
-// Asked by topic. A word that is also everyday talk (忍辱負重, 去廟裡布施)
-// counts only next to a word about the sutra; names and terms of the sutra
-// count on their own.
+// Asked by topic. Names and terms only the sutra uses count on their own; a
+// word that is also everyday talk (忍辱負重, 去廟裡布施, 五眼聯盟, 無我的境界)
+// counts only next to a word about the sutra. 無相 is not 無相界, this bot.
 const TOPICS = [
-  { words: /須菩提/, chapters: [2], alone: true, note: '須菩提是佛的弟子，經裡向佛提問的人，第一次開口在這一分' },
-  { words: /燃燈佛|然燈佛|授記/, chapters: [10, 17], alone: true },
+  { words: /須菩提.{0,6}(哭|流淚|涕淚|悲泣)/, chapters: [14], alone: true },
+  { words: /須菩提(是誰|是什麼|是哪|是佛的)/, chapters: [2], alone: true, note: '須菩提是佛的弟子，經裡向佛提問的人，第一次開口在這一分' },
+  { words: /燃燈佛|然燈佛|授記|受記/, chapters: [10, 17], alone: true },
   { words: /歌利王/, chapters: [14], alone: true },
   {
     words: /四句偈/,
@@ -92,14 +121,22 @@ const TOPICS = [
     note: '經裡好幾分都說「乃至四句偈等」，沒有指明是哪四句；一般常舉的是下面兩首偈，兩首在經裡各只出現一次',
   },
   { words: /一合相/, chapters: [30], alone: true },
-  { words: /五眼/, chapters: [18], alone: true },
+  { words: /筏喻/, chapters: [6], alone: true },
+  { words: /六如/, chapters: [32], alone: true },
+  { words: /無為法/, chapters: [7], alone: true },
+  { words: /無所住/, chapters: [10, 4], alone: true },
+  { words: /五眼(是什麼|是哪|指的是|在講)/, chapters: [18], alone: true },
+  { words: /五眼/, chapters: [18] },
   { words: /忍辱/, chapters: [14] },
   { words: /筏/, chapters: [6] },
   { words: /四相|我相人相|眾生相|壽者相/, chapters: [3] },
   { words: /布施/, chapters: [4] },
-  { words: /微塵/, chapters: [30] },
-  { words: /開頭|一開始|第一段/, chapters: [1] },
-  { words: /結尾|最後一段|最後那段|最後一分|最後面/, chapters: [32] },
+  { words: /微塵/, chapters: [30, 13] },
+  { words: /恆河沙|恒河沙/, chapters: [11] },
+  { words: /無我/, chapters: [17] },
+  { words: /無相(?!界)/, chapters: [5] },
+  { words: /開頭|第一段|第一句/, chapters: [1] },
+  { words: /結尾|最後一段|最後那段|最後一句|最後一分/, chapters: [32] },
   { words: /經名|為什麼叫/, chapters: [13] },
 ]
 
@@ -113,13 +150,20 @@ function byTopic(text) {
   )
 }
 
-// 這句出自哪裡, 什麼意思, 看不懂: asking about a line the bot just quoted,
-// such as today's line. Only quotes of six characters or more that are in the
-// sutra count, so the user's own words in quotes (「只能這樣」) do not.
-const REFERS_BACK = /這句|那句|這段|那段|出處|原文|出自|哪一分|第幾分|哪一段|哪裡來|在哪裡|什麼意思|不懂|怎麼解釋|在講什麼|在說什麼/
+// 這句出自哪裡, 什麼意思, 看不懂: asking about a line the bot just quoted, such
+// as today's line. It has to be plainly about that line, so 這段時間好累 and
+// 我不懂我媽為什麼這樣 are not. Only quotes of six characters or more that are
+// in the sutra count, so the user's own words in quotes (「只能這樣」) do not.
+const POINTS_AT_THE_LINE = /這句|那句|這一句|那一句|這兩句|這段經|那段經|這段話|那段話|出處|出自|哪一分|第幾分(?!鐘)|原文/
+const ONLY_ASKS_WHAT_IT_MEANS =
+  /^(那|欸|嗯|所以|請問)?\s*我?(還是)?(這是|那是)?(是什麼意思|什麼意思|看不懂|不懂|聽不懂|不太懂|怎麼解釋|在講什麼|在說什麼)[嗎呢啊耶欸喔？?。!！~\s]*$/
+
+// 我老闆那段話到底什麼意思 is about someone else's words.
+const SOMEONE_ELSE_SAID = /(他|她|老闆|主管|同事|朋友|我媽|我爸|媽媽|爸爸|老師|男友|女友|男朋友|女朋友|老公|老婆|家人|別人|對方).{0,6}(這句|那句|這段|那段|說)/
 
 function referredBack(text, lastReply) {
-  if (!lastReply || !REFERS_BACK.test(text)) return []
+  if (!lastReply || SOMEONE_ELSE_SAID.test(text)) return []
+  if (!(POINTS_AT_THE_LINE.test(text) || ONLY_ASKS_WHAT_IT_MEANS.test(text.trim()))) return []
   return [...lastReply.matchAll(/「([^」]+)」/g)]
     .map(([, quote]) => han(quote))
     .filter((words) => words.length >= 6)
@@ -129,26 +173,30 @@ function referredBack(text, lastReply) {
 
 /**
  * The chapters the model should read before answering this message: the ones
- * it quotes, names or asks about, or the one a line the bot just quoted is from.
+ * it quotes or names, or the one a line the bot just quoted is from; failing
+ * those, the ones its topic is in. A topic adds nothing to a quote: 應無所住而生
+ * 其心 is in the tenth chapter only, and handing over the fourth as well (it has
+ * 應無所住 too) invites "this line appears twice".
  */
 export function passagesFor(userText, recentTurns = []) {
   const last = recentTurns.at(-1)
   const lastReply = last?.role === 'assistant' ? last.content : ''
+  const pointed = [...quotedIn(userText), ...byChapterName(userText), ...referredBack(userText, lastReply)]
   const seen = new Set()
-  return [...quotedIn(userText), ...byChapterName(userText), ...referredBack(userText, lastReply), ...byTopic(userText)]
+  return (pointed.length ? pointed : byTopic(userText))
     .filter(({ chapter }) => !seen.has(chapter.title) && seen.add(chapter.title))
     .slice(0, MOST_CHAPTERS)
 }
 
 // 今天的一句: on a Taipei day everyone gets the same line, going through the
 // sutra in order, so pressing again is never a fresh draw (that would be
-// 抽籤). Each line is the text word for word, with its chapter; lines that read
-// as a rebuke out of context (是人行邪道) are left out.
+// 抽籤). Each line is the text word for word, with its chapter. Lines that read
+// as a rebuke when shown alone are left out (是人行邪道, and the two that call
+// the reader 凡夫), and so is a second line on giving in a row.
 export const DAILY_LINES = [
   ['飯食訖，收衣缽，洗足已，敷座而坐。', 1],
   ['應云何住？云何降伏其心？', 2],
   ['菩薩於法，應無所住，行於布施。', 4],
-  ['菩薩應如是布施，不住於相。', 4],
   ['凡所有相，皆是虛妄。若見諸相非相，即見如來。', 5],
   ['知我說法，如筏喻者，法尚應捨，何況非法。', 6],
   ['一切賢聖，皆以無為法而有差別。', 7],
@@ -167,11 +215,9 @@ export const DAILY_LINES = [
   ['說法者，無法可說，是名說法。', 21],
   ['是法平等，無有高下。', 23],
   ['以無我、無人、無眾生、無壽者，修一切善法。', 23],
-  ['如來說有我者，則非有我，而凡夫之人以為有我。', 25],
   ['於法不說斷滅相。', 27],
   ['菩薩所作福德，不應貪著。', 28],
   ['如來者，無所從來，亦無所去，故名如來。', 29],
-  ['一合相者，則是不可說；但凡夫之人貪著其事。', 30],
   ['於一切法，應如是知，如是見，如是信解，不生法相。', 31],
   ['不取於相，如如不動。', 32],
   ['一切有為法，如夢幻泡影，如露亦如電，應作如是觀。', 32],
@@ -181,7 +227,8 @@ const TAIPEI_OFFSET_MS = 8 * 3_600_000
 const DAY_MS = 86_400_000
 
 export function todaysLine(now = Date.now()) {
-  const [line, chapterNumber] = DAILY_LINES[Math.floor((now + TAIPEI_OFFSET_MS) / DAY_MS) % DAILY_LINES.length]
+  const at = Number.isFinite(now) ? now : Date.now()
+  const [line, chapterNumber] = DAILY_LINES[Math.floor((at + TAIPEI_OFFSET_MS) / DAY_MS) % DAILY_LINES.length]
   return { line, chapter: CHAPTERS[chapterNumber - 1] }
 }
 
