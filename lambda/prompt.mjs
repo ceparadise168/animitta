@@ -1,5 +1,6 @@
 // version: prompt-v3.4 (v3.3 + 24-hour hotlines, verbatim library, a way to real people — 2026-11-23)
 // rollback: git checkout prompt-v2 -- lambda/prompt.mjs
+import { passagesFor, passageNote } from './sutra.mjs'
 
 // 衛福部's free counselling for 15–45-year-olds (115年青壯世代心理健康支持方案)
 // runs to 2026-12-31 and nothing says it continues, so from 2027 on the bot
@@ -403,6 +404,11 @@ export function buildMessages({ summary, recentTurns, previousSession = null, us
   if (previousSession) {
     messages.push({ role: 'system', content: previousSessionNote(previousSession) })
   }
+  // The sutra is read from the text, not from memory, whenever the message
+  // points at it. Built here so every caller, the eval scripts included, sends
+  // the model what production sends.
+  const passages = passagesFor(userInput, recentTurns)
+  if (passages.length) messages.push({ role: 'system', content: passageNote(passages) })
   messages.push({ role: 'user', content: userInput })
   return messages
 }
