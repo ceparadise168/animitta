@@ -8,6 +8,7 @@ jest.unstable_mockModule('../lambda/line.mjs', () => ({
 }))
 
 process.env.LLM_PROVIDER = 'anthropic'
+process.env.BEDROCK_MODEL_ID = 'jp.anthropic.claude-haiku-4-5-20251001-v1:0'
 
 const mockClearMemory = jest.fn()
 jest.unstable_mockModule('../lambda/services/memory.mjs', () => ({
@@ -78,6 +79,14 @@ describe('commands', () => {
     const text = mockReplyMessage.mock.calls[0][1]
     expect(text).toContain('只用來讓它接得上話，不會拿去做別的事')
     expect(text).toContain('都有加密，不過要產生回覆，你傳的文字還是會交給 AI 服務')
+  })
+
+  it('tells users their words may go to Amazon instead when the backup is on', async () => {
+    await handleCommand('user1', 'token1', '@關於')
+
+    expect(mockReplyMessage.mock.calls[0][1]).toContain(
+      '（平常是 Anthropic 的 Claude；Anthropic 那邊出狀況時，改由 Amazon 在日本的機房執行同一個 Claude 模型）處理'
+    )
   })
 
   it('tells users where a voice message goes, that the recording is deleted, and the monthly limit the voice service enforces', async () => {

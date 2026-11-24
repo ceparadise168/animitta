@@ -30,6 +30,9 @@ jest.unstable_mockModule('../lambda/commands.mjs', () => ({
   isCommand: (text) => text === '@隨意聊聊',
 }))
 
+const mockSelfTest = jest.fn()
+jest.unstable_mockModule('../lambda/self-test.mjs', () => ({ selfTest: mockSelfTest }))
+
 const { handler } = await import('../lambda/index.mjs')
 const SENT_AT = 1795270000000
 
@@ -281,6 +284,24 @@ describe('Lambda handler', () => {
     expect(result.statusCode).toBe(200)
     expect(mockReplyMessage).toHaveBeenCalledTimes(1)
     expect(mockReplyMessage).toHaveBeenCalledWith('tok', expect.stringContaining('暫時'))
+  })
+
+  it('runs the self-test for a direct invoke, without touching LINE', async () => {
+    mockSelfTest.mockResolvedValueOnce({ statusCode: 200, body: '{"anthropic":"ok"}' })
+
+    const result = await handler({ selfTest: true })
+
+    expect(result).toEqual({ statusCode: 200, body: '{"anthropic":"ok"}' })
+    expect(mockVerifySignature).not.toHaveBeenCalled()
+  })
+
+  it('never runs the self-test for a request through the webhook URL', async () => {
+    mockVerifySignature.mockReturnValueOnce(false)
+
+    const result = await handler({ selfTest: true, requestContext: { http: { method: 'POST' } }, body: '{}', headers: {} })
+
+    expect(result.statusCode).toBe(401)
+    expect(mockSelfTest).not.toHaveBeenCalled()
   })
 
   it('gives the 24-hour hotlines when the words that went unanswered talk of ending a life', async () => {

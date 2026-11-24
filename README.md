@@ -44,7 +44,11 @@ LINE App → Lambda Function URL → Lambda (Node.js 22.x) → OpenAI / Anthropi
 - Photos, videos, files, locations and audio links from outside LINE get a short "type or send voice instead" reply, which is remembered
 - Conversation memory: the last turns, plus an LLM-compressed summary for long-term context. After `SESSION_IDLE_HOURS` of silence a new session starts and the previous one comes back as background
 - Retention: a person's turns and summary are gone `CONVERSATION_TTL_DAYS` (30) days after their last message. Each turn expires that long after it was said, the summary that long after the latest exchange. 關於 quotes the number. The function's log group has the same retention, and a handler error is logged without the words that went unanswered. The voice minute counter is kept 40 days, so a month's quota holds
+- When Anthropic fails: a fast 5xx or 529, or a dropped connection, is tried once more; anything else except a rate limit (429) goes to the backup, the same Claude model on Amazon Bedrock (`BEDROCK_MODEL_ID`, a `jp.` profile that runs only in Tokyo and Osaka). One try at Anthropic gets at most 20 seconds, so a hung Anthropic still leaves the backup time before the 55-second deadline. A reply from the backup logs `Provider fallback: <Anthropic's failure>`, which the `animitta-answered-by-backup` alarm counts, since the failure alarm no longer sees it. 關於 says the backup exists while it is configured. Errors name only the status and the documented error type, never the API's own text
+- Self-test: `aws lambda invoke --function-name animitta --payload '{"selfTest":true}' --cli-binary-format raw-in-base64-out out.json` asks Anthropic and the backup a one-word question and checks a LINE signature with the real secret, then writes `{"anthropic":"ok","bedrock":"ok","signature":"ok"}` or the failure messages. Only a direct invoke runs it; requests through the webhook URL carry `requestContext` and never do
 - Alerts: failed replies email `ALERT_EMAIL`; reminders go out before `ANTHROPIC_KEY_EXPIRES_ON`
+- Alert triage: `animitta-alert-triage` reads the failure lines behind each alarm and emails `ALERT_EMAIL` (its own topic, confirmed once) the cause, what users saw, and the one step to take, once per cause in six hours. It keeps only status codes, documented error types, error class names and file:line of the bot's code, so nothing a user typed leaves the log. For a code error or a cause it cannot name, it also wakes a Claude Code routine (URL and token in SSM `/animitta/alert-routine/*`, at most once in six hours) with that summary and the commit that runs; the email links the session
+- Delivery: a PR runs `test` (to be required by a ruleset on main) and `deploy-scope`, which fails when cdk/ or ops/ changed, since a merge does not deploy those. A merge that changes lambda/ runs `deploy`, which lists the changed files on the run page and waits for Eric to approve the `production` environment; the AWS role it assumes trusts only jobs in that environment. It refuses when lambda/ on main has moved on, when cdk/ or ops/ differ from what `npm run deploy` last put up, or when the live code is not what the last deploy recorded (SSM `/animitta/deployed`). It saves the live package, uploads lambda/, runs the self-test (Anthropic or the backup must answer) and an unsigned webhook request, records the commit, and on any failure or cancellation puts the saved package back and emails. Every `aws lambda` call anywhere in .github/ asks for one listed field or prints nothing: Lambda's answers carry the bot's keys and the Actions logs are public (`scripts/check-workflows.mjs`). The webhook URL is a `production` environment secret, so the logs mask it. The approval holds only while the Claude routine reaches GitHub through the Claude GitHub App, which has no deployments permission; a token saved with `/web-setup` is Eric's own and could approve
 
 ## Quick Start
 
@@ -70,7 +74,7 @@ cp .env.example .env
 
 # Deploy
 npx cdk bootstrap  # First time only
-npx cdk deploy --app "npx ts-node --prefer-ts-exts cdk/bin/app.ts"
+npm run deploy     # only from the latest main with nothing uncommitted
 
 # Set up Rich Menu
 node scripts/setup-richmenu.mjs
@@ -85,6 +89,7 @@ See `.env.example` for all available configuration options.
 Key variables:
 - `LLM_PROVIDER`: `openai` or `anthropic`
 - `CHAT_MODEL_OPENAI`: Model for conversation (e.g., `gpt-4.1-mini`)
+- `BEDROCK_MODEL_ID`: The backup for Anthropic (default: `jp.anthropic.claude-haiku-4-5-20251001-v1:0`; empty turns it off). It must be a `jp.` profile of the same model as `CHAT_MODEL_ANTHROPIC`, or synth fails, because 關於 tells users it is the same model, run in Japan. Before it can answer, someone with admin rights submits Anthropic's first-time-use form in the Bedrock console and sends one message in the playground, which also subscribes the account through AWS Marketplace; then the self-test shows `"bedrock":"ok"`
 - `MAX_RECENT_TURNS`: Number of recent conversation turns to keep (default: 5)
 - `CONVERSATION_TTL_DAYS`: Days without a message after which everything remembered is deleted (default: 30). 關於 quotes it to users, and the function's log group uses it too
 - `VOICE_MINUTES_PER_MONTH`: Voice minutes each user may send a month (default: 30). 關於 quotes it to users

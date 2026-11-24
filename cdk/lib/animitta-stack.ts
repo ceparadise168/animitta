@@ -17,6 +17,19 @@ const KEY_REMINDER_DAYS_BEFORE = [7, 1]
 // Everyone's voice minutes together each month, so a crowd cannot run up the
 // Transcribe bill (about US$0.006 a minute). voice.mjs enforces it.
 const VOICE_MINUTES_ALL_USERS = process.env.VOICE_MINUTES_ALL_USERS_PER_MONTH || '1500'
+// The same Claude model on Amazon Bedrock, run only in Japan's regions (Tokyo,
+// Osaka), answers when the Anthropic account cannot. Empty turns the backup off.
+const BEDROCK_MODEL_ID = process.env.BEDROCK_MODEL_ID ?? 'jp.anthropic.claude-haiku-4-5-20251001-v1:0'
+const BEDROCK_MODEL_REGIONS = ['ap-northeast-1', 'ap-northeast-3']
+const CHAT_MODEL_ANTHROPIC = process.env.CHAT_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
+// 關於 tells people the backup runs the same model, so it has to be true.
+if (BEDROCK_MODEL_ID && !BEDROCK_MODEL_ID.includes(CHAT_MODEL_ANTHROPIC)) {
+  throw new Error(`BEDROCK_MODEL_ID ${BEDROCK_MODEL_ID} is not the chat model ${CHAT_MODEL_ANTHROPIC}`)
+}
+// It also says Japan, and the permission below covers only Japan's regions.
+if (BEDROCK_MODEL_ID && !BEDROCK_MODEL_ID.startsWith('jp.')) {
+  throw new Error(`BEDROCK_MODEL_ID ${BEDROCK_MODEL_ID} is not a jp. profile`)
+}
 const CONVERSATION_TTL_DAYS = Number(process.env.CONVERSATION_TTL_DAYS || '30')
 if (!Number.isInteger(CONVERSATION_TTL_DAYS) || CONVERSATION_TTL_DAYS < 1) {
   throw new Error(`CONVERSATION_TTL_DAYS must be a whole number of days, got ${process.env.CONVERSATION_TTL_DAYS}`)
@@ -72,7 +85,8 @@ export class AnimittaStack extends cdk.Stack {
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
         CHAT_MODEL_OPENAI: process.env.CHAT_MODEL_OPENAI || 'gpt-4.1-mini',
         SUMMARY_MODEL_OPENAI: process.env.SUMMARY_MODEL_OPENAI || 'gpt-4.1-mini',
-        CHAT_MODEL_ANTHROPIC: process.env.CHAT_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001',
+        CHAT_MODEL_ANTHROPIC,
+        BEDROCK_MODEL_ID,
         CHAT_EFFORT_ANTHROPIC: process.env.CHAT_EFFORT_ANTHROPIC || '',
         SUMMARY_MODEL_ANTHROPIC: process.env.SUMMARY_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001',
         LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
@@ -105,6 +119,20 @@ export class AnimittaStack extends cdk.Stack {
       })
     )
 
+    if (BEDROCK_MODEL_ID) {
+      const profileArn = `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/${BEDROCK_MODEL_ID}`
+      const model = BEDROCK_MODEL_ID.replace(/^[a-z]+\./, '')
+      fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['bedrock:InvokeModel'], resources: [profileArn] }))
+      // The model itself only through that profile, which keeps it in Japan.
+      fn.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['bedrock:InvokeModel'],
+          resources: BEDROCK_MODEL_REGIONS.map((region) => `arn:aws:bedrock:${region}::foundation-model/${model}`),
+          conditions: { StringEquals: { 'bedrock:InferenceProfileArn': profileArn } },
+        })
+      )
+    }
+
     new logs.LogRetention(this, 'HandlerLogRetention', {
       logGroupName: `/aws/lambda/${fn.functionName}`,
       retention: logRetentionWithin(CONVERSATION_TTL_DAYS),
@@ -126,7 +154,10 @@ export class AnimittaStack extends cdk.Stack {
 
     this.addFailureAlarm(fn, alertTopic)
     this.addVoiceLimitAlarm(fn, alertTopic)
+    if (BEDROCK_MODEL_ID) this.addBackupAlarm(fn, alertTopic)
     this.addKeyExpiryReminders(alertTopic, process.env.ANTHROPIC_KEY_EXPIRES_ON)
+    this.addAlertTriage(fn, table, alertTopic, alertEmail)
+    this.addDeployRole(fn, alertTopic)
   }
 
   // index.mjs catches errors and returns 200, so Lambda's own Errors metric
@@ -187,6 +218,135 @@ export class AnimittaStack extends cdk.Stack {
     }).addAlarmAction(new cloudwatchActions.SnsAction(topic))
   }
 
+  // The backup answering hides Anthropic being down from the failure alarm, so
+  // a key or billing problem could last for weeks unseen. This one says so.
+  private addBackupAlarm(fn: lambda.Function, topic: sns.ITopic) {
+    const answeredByBackup = new logs.MetricFilter(this, 'BackupFilter', {
+      logGroup: logs.LogGroup.fromLogGroupName(this, 'BackupLogs', `/aws/lambda/${fn.functionName}`),
+      filterPattern: logs.FilterPattern.anyTerm('Provider fallback'),
+      metricNamespace: 'Animitta',
+      metricName: 'AnsweredByBackup',
+      metricValue: '1',
+    }).metric({ statistic: 'Sum', period: cdk.Duration.hours(1) })
+
+    new cloudwatch.Alarm(this, 'BackupAlarm', {
+      alarmName: 'animitta-answered-by-backup',
+      alarmDescription:
+        '不急：Anthropic 出了問題，這一小時內有訊息改由 Amazon Bedrock 上的同一個 Claude 回覆，使用者照常收到回覆。' +
+        '到 CloudWatch Logs /aws/lambda/animitta 搜尋 "Provider fallback"，那一行寫著 Anthropic 回的狀態碼：401 是金鑰失效，400 多半是儲值用完，529 或 5xx 是 Anthropic 塞車。',
+      metric: answeredByBackup,
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(new cloudwatchActions.SnsAction(topic))
+  }
+
+  // On each alarm: name the cause in an email, and wake the Claude routine when
+  // the cause may need a code change. The email has a topic of its own, since
+  // this function listens to the alert topic.
+  private addAlertTriage(bot: lambda.Function, table: dynamodb.ITable, alertTopic: sns.ITopic, email: string) {
+    const triageTopic = new sns.Topic(this, 'TriageTopic', { displayName: '無相界警報說明' })
+    triageTopic.addSubscription(new subscriptions.EmailSubscription(email))
+    const param = (name: string) => `arn:aws:ssm:${this.region}:${this.account}:parameter/animitta/${name}`
+
+    const triage = new lambda.Function(this, 'AlertTriage', {
+      functionName: 'animitta-alert-triage',
+      runtime: lambda.Runtime.NODEJS_22_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.resolve(__dirname, '../../ops/alert-triage')),
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
+      retryAttempts: 0,
+      environment: {
+        TABLE: table.tableName,
+        BOT_LOG_GROUP: `/aws/lambda/${bot.functionName}`,
+        TRIAGE_TOPIC_ARN: triageTopic.topicArn,
+        ROUTINE_URL_PARAM: '/animitta/alert-routine/url',
+        ROUTINE_TOKEN_PARAM: '/animitta/alert-routine/token',
+        DEPLOYED_PARAM: '/animitta/deployed',
+      },
+    })
+    new logs.LogRetention(this, 'AlertTriageLogRetention', {
+      logGroupName: `/aws/lambda/${triage.functionName}`,
+      retention: logRetentionWithin(CONVERSATION_TTL_DAYS),
+    })
+    alertTopic.addSubscription(new subscriptions.LambdaSubscription(triage))
+    triageTopic.grantPublish(triage)
+    triage.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['logs:FilterLogEvents'],
+        resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/aws/lambda/${bot.functionName}:*`],
+      })
+    )
+    triage.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter'],
+        resources: [param('alert-routine/url'), param('alert-routine/token'), param('deployed')],
+      })
+    )
+    triage.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['kms:Decrypt'],
+        resources: ['*'],
+        conditions: {
+          StringEquals: {
+            'kms:ViaService': `ssm.${this.region}.amazonaws.com`,
+            'kms:EncryptionContext:PS_ARN': param('alert-routine/token'),
+          },
+        },
+      })
+    )
+    // Only its own rows: the same table holds everyone's conversations.
+    triage.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:PutItem'],
+        resources: [table.tableArn],
+        conditions: { 'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['OPS#ALERT'] } },
+      })
+    )
+  }
+
+  // GitHub Actions deploys lambda/ once Eric approves the production
+  // environment. The role trusts only jobs in that environment, so changing the
+  // workflow cannot skip his approval. Replacing the code means running as the
+  // bot, with its data and keys, which is why that approval is the gate.
+  private addDeployRole(bot: lambda.Function, alertTopic: sns.ITopic) {
+    const github = iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
+      this,
+      'GitHubOidc',
+      `arn:aws:iam::${this.account}:oidc-provider/token.actions.githubusercontent.com`
+    )
+    const role = new iam.Role(this, 'GitHubDeployRole', {
+      roleName: 'animitta-github-deploy',
+      maxSessionDuration: cdk.Duration.hours(1),
+      assumedBy: new iam.WebIdentityPrincipal(github.openIdConnectProviderArn, {
+        StringEquals: {
+          'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+          'token.actions.githubusercontent.com:sub': 'repo:ceparadise168/animitta:environment:production',
+        },
+      }),
+    })
+    // GetFunction saves the live code to put back; GetFunctionConfiguration
+    // reads its hash and waits for an update. Their answers, like
+    // UpdateFunctionCode's, carry the bot's keys, so the workflow prints none.
+    role.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['lambda:UpdateFunctionCode', 'lambda:GetFunction', 'lambda:GetFunctionConfiguration', 'lambda:InvokeFunction'],
+        resources: [bot.functionArn],
+      })
+    )
+    role.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/animitta/deployed`],
+      })
+    )
+    alertTopic.grantPublish(role)
+    new cdk.CfnOutput(this, 'GitHubDeployRoleArn', { value: role.roleArn })
+    new cdk.CfnOutput(this, 'AlertTopicArn', { value: alertTopic.topicArn })
+  }
+
   private addKeyExpiryReminders(topic: sns.ITopic, expiresOn: string | undefined) {
     if (!expiresOn) return
     if (!/^\d{4}-\d{2}-\d{2}$/.test(expiresOn)) {
@@ -208,7 +368,7 @@ export class AnimittaStack extends cdk.Stack {
               '換 key 的步驟：\n' +
               '1. 到 Anthropic Console 產生新的 key\n' +
               '2. 在 ~/workspace/vibe-coding/animitta/.env 更新 ANTHROPIC_API_KEY 和 ANTHROPIC_KEY_EXPIRES_ON\n' +
-              '3. 在同一個資料夾執行 npx cdk deploy\n\n' +
+              '3. 在同一個資料夾執行 npm run deploy\n\n' +
               '要改 .env 再部署,不要只改 Lambda Console，不然下次部署會把舊的 key 蓋回去。',
           ),
         }),

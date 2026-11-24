@@ -1,0 +1,177 @@
+name: deploy
+# Deploys lambda/ after a merge to main, once Eric approves the production
+# environment. cdk/ and ops/ are deployed from a computer with npm run deploy.
+on:
+  push:
+    branches: [main]
+    paths: ['lambda/**']
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+      - run: node scripts/check-workflows.mjs
+      # Shown on the run page, where Eric approves: what goes live, compared
+      # with the last successful automatic deploy.
+      - name: What this deploy changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].head_sha // empty')
+          {
+            if [ -z "$last" ]; then
+              echo "### First automatic deploy: compare with what the last npm run deploy put up"
+              echo '```'
+              git log --oneline -10 -- lambda
+              echo '```'
+            else
+              echo "### Changed since the last successful automatic deploy (${last:0:7}); if npm run deploy ran later, that one is live"
+              echo '```'
+              git diff --stat "$last" "$GITHUB_SHA"
+              echo '```'
+              if git diff --name-only "$last" "$GITHUB_SHA" | grep -q '^\.github/'; then
+                echo "**This changes GitHub Actions workflows. Read them before approving.**"
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # No npm install here: this job holds AWS credentials, and lambda/ has no
+  # dependencies of its own.
+  deploy:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ap-northeast-1
+      FUNCTION: animitta
+      MARKER: /animitta/deployed
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Settings are in place
+        env:
+          ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          TOPIC: ${{ vars.ALERT_TOPIC_ARN }}
+          HAS_WEBHOOK: ${{ secrets.WEBHOOK_URL != '' }}
+        run: |
+          if [ -z "$ROLE" ] || [ -z "$TOPIC" ] || [ "$HAS_WEBHOOK" != true ]; then
+            echo "::error::Set the AWS_DEPLOY_ROLE_ARN and ALERT_TOPIC_ARN variables and the production WEBHOOK_URL secret first."
+            exit 1
+          fi
+
+      # A re-run of an old run would otherwise put back older code.
+      - name: Deploy only what main holds now
+        run: |
+          git fetch --quiet origin main
+          if [ "$(git rev-parse HEAD:lambda)" != "$(git rev-parse origin/main:lambda)" ]; then
+            echo "::error::lambda/ on main has changed since this run started. Deploy the newest instead."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-northeast-1
+
+      - name: Check what is live matches the record
+        run: |
+          aws ssm get-parameter --name "$MARKER" --query Parameter.Value --output text > marker.json
+          here="$(git rev-parse HEAD:cdk) $(git rev-parse HEAD:ops)"
+          if [ "$(jq -r .infraTree marker.json)" != "$here" ]; then
+            echo "::error::cdk/ or ops/ changed since the last npm run deploy. Deploy from a computer with npm run deploy, which deploys lambda/ too."
+            exit 1
+          fi
+          live=$(aws lambda get-function-configuration --function-name "$FUNCTION" --query CodeSha256 --output text)
+          if [ "$live" != "$(jq -r .codeSha256 marker.json)" ]; then
+            echo "::error::The code live is not what the last deploy recorded: something else deployed. Run npm run deploy from a computer."
+            exit 1
+          fi
+
+      # Kept to put back if anything below fails.
+      - name: Save the code that is live
+        run: |
+          url=$(aws lambda get-function --function-name "$FUNCTION" --query Code.Location --output text)
+          curl -sSf -o previous.zip "$url"
+          [ "$(openssl dgst -sha256 -binary previous.zip | base64)" = "$(jq -r .codeSha256 marker.json)" ]
+
+      - name: Deploy
+        id: deploy
+        run: |
+          (cd lambda && zip -qrX ../new.zip .)
+          aws lambda update-function-code --function-name "$FUNCTION" --zip-file fileb://new.zip --query CodeSha256 --output text > /dev/null
+          aws lambda wait function-updated --function-name "$FUNCTION" > /dev/null
+          live=$(aws lambda get-function-configuration --function-name "$FUNCTION" --query CodeSha256 --output text)
+          if [ "$live" != "$(openssl dgst -sha256 -binary new.zip | base64)" ]; then
+            echo "::error::The code Lambda holds is not this commit's."
+            exit 1
+          fi
+
+      # The bot must answer one way or another (Anthropic or the backup), and
+      # the webhook must still turn away unsigned requests.
+      - name: Self-test and an unsigned webhook request
+        id: check
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        run: |
+          aws lambda invoke --function-name "$FUNCTION" --cli-binary-format raw-in-base64-out --payload '{"selfTest":true}' self-test.json --query StatusCode --output text > /dev/null
+          jq -r '.body | fromjson | "anthropic: \(.anthropic)\nbedrock: \(.bedrock)\nsignature: \(.signature)"' self-test.json
+          jq -e '.body | fromjson | .signature == "ok" and (.anthropic == "ok" or .bedrock == "ok")' self-test.json > /dev/null
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"events":[]}' "$WEBHOOK_URL")
+          if [ "$code" != 401 ]; then
+            echo "::error::An unsigned webhook request got $code, not 401."
+            exit 1
+          fi
+
+      - name: Record what runs
+        run: |
+          live=$(aws lambda get-function-configuration --function-name "$FUNCTION" --query CodeSha256 --output text)
+          jq -n --arg commit "$GITHUB_SHA" --arg tree "$(git rev-parse HEAD:cdk) $(git rev-parse HEAD:ops)" --arg sha "$live" --arg at "$(date -u +%FT%TZ)" \
+            '{commit: $commit, infraTree: $tree, codeSha256: $sha, at: $at, by: "github actions"}' > marker.json
+          aws ssm put-parameter --name "$MARKER" --type String --overwrite --value file://marker.json --query Version --output text > /dev/null
+
+      # Runs when the upload started but the checks did not pass, including when
+      # the run was cancelled midway.
+      - name: Put back the code that was live
+        if: always() && steps.deploy.outcome != 'skipped' && steps.check.outcome != 'success'
+        env:
+          ALERT_TOPIC_ARN: ${{ vars.ALERT_TOPIC_ARN }}
+        run: |
+          aws lambda update-function-code --function-name "$FUNCTION" --zip-file fileb://previous.zip --query CodeSha256 --output text > /dev/null
+          aws lambda wait function-updated --function-name "$FUNCTION" > /dev/null
+          live=$(aws lambda get-function-configuration --function-name "$FUNCTION" --query CodeSha256 --output text)
+          aws lambda invoke --function-name "$FUNCTION" --cli-binary-format raw-in-base64-out --payload '{"selfTest":true}' after.json --query StatusCode --output text > /dev/null
+          if [ "$live" = "$(openssl dgst -sha256 -binary previous.zip | base64)" ] && jq -e '.body | fromjson | .signature == "ok"' after.json > /dev/null; then
+            outcome="已經放回原本在線上的那一版。main 上有 ${GITHUB_SHA:0:7}，但線上沒有：請 revert，或修好再 merge。"
+          else
+            outcome="放回原本那一版也沒成功，線上的程式碼不確定是哪一版，請馬上看。"
+          fi
+          message="無相界部署 ${GITHUB_SHA:0:7} 沒有通過上線後的檢查。${outcome} 紀錄：${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          aws sns publish --topic-arn "$ALERT_TOPIC_ARN" --subject "[animitta] deploy rolled back" --message "$message" --query MessageId --output text > /dev/null
