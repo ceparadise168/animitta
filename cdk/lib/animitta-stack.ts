@@ -289,7 +289,12 @@ export class AnimittaStack extends cdk.Stack {
       new iam.PolicyStatement({
         actions: ['kms:Decrypt'],
         resources: ['*'],
-        conditions: { StringEquals: { 'kms:ViaService': `ssm.${this.region}.amazonaws.com` } },
+        conditions: {
+          StringEquals: {
+            'kms:ViaService': `ssm.${this.region}.amazonaws.com`,
+            'kms:EncryptionContext:PS_ARN': param('alert-routine/token'),
+          },
+        },
       })
     )
     // Only its own rows: the same table holds everyone's conversations.
@@ -322,11 +327,12 @@ export class AnimittaStack extends cdk.Stack {
         },
       }),
     })
-    // GetFunctionConfiguration is for the wait after an update; its answer, like
-    // UpdateFunctionCode's, carries the bot's keys, so the workflow prints neither.
+    // GetFunction saves the live code to put back; GetFunctionConfiguration
+    // reads its hash and waits for an update. Their answers, like
+    // UpdateFunctionCode's, carry the bot's keys, so the workflow prints none.
     role.addToPolicy(
       new iam.PolicyStatement({
-        actions: ['lambda:UpdateFunctionCode', 'lambda:GetFunctionConfiguration', 'lambda:InvokeFunction'],
+        actions: ['lambda:UpdateFunctionCode', 'lambda:GetFunction', 'lambda:GetFunctionConfiguration', 'lambda:InvokeFunction'],
         resources: [bot.functionArn],
       })
     )

@@ -44,7 +44,7 @@ function setUp({ lines, fire = { ok: true, json: async () => ({ claude_code_sess
   const fetch = jest.fn().mockResolvedValue(fire)
   const handler = makeHandler({ logs, db, sns, ssm, fetch, env, now: () => NOW })
   const emails = () => sns.send.mock.calls.map(([command]) => command.input)
-  return { handler, db, fetch, emails }
+  return { handler, db, fetch, emails, sns }
 }
 
 const codeError = "Handler error: TypeError: Cannot read properties of undefined (reading '我好累')\n    at foldIntoSummary (file:///var/task/services/memory.mjs:172:31)"
@@ -128,12 +128,52 @@ describe('alert triage', () => {
     expect(emails()).toHaveLength(0)
   })
 
-  it('treats an alarm with no log lines as a test: one email, no Claude', async () => {
+  it('treats an alarm with no log lines as a test: one email in six hours, no Claude', async () => {
     const { handler, fetch, emails } = setUp({ lines: [] })
 
     await handler(alarm('animitta-handler-failures'))
+    await handler(alarm('animitta-handler-failures'))
 
     expect(fetch).not.toHaveBeenCalled()
+    expect(emails()).toHaveLength(1)
     expect(emails()[0].Message).toContain('找不到對應的錯誤行')
+  })
+
+  it('wakes Claude when the runtime itself crashed', async () => {
+    const { handler, fetch } = setUp({ lines: ['2026-11-24T09:00:00.000Z\tid\tERROR\tRuntime exited with error: signal: killed'] })
+
+    await handler(alarm('animitta-handler-failures'))
+
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('frees the cause to be emailed again when sending the email failed', async () => {
+    const { handler, emails, sns } = setUp({ lines: [keyError] })
+    sns.send.mockRejectedValueOnce(new Error('SNS down'))
+
+    await expect(handler(alarm('animitta-handler-failures'))).rejects.toThrow('SNS down')
+    await handler(alarm('animitta-handler-failures'))
+
+    expect(emails()).toHaveLength(2)
+  })
+
+  it('counts a fire whose answer it could not read as started, and does not fire again', async () => {
+    const { handler, fetch, db, emails } = setUp({ lines: [codeError], fire: { ok: true, json: async () => { throw new SyntaxError('x') } } })
+
+    await handler(alarm('animitta-handler-failures'))
+    db.rows.delete('EMAIL#code:TypeError:services/memory.mjs:172')
+    await handler(alarm('animitta-handler-failures'))
+
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(emails()[0].Message).toContain('Claude 已經開始查')
+  })
+
+  it('does not say Claude is looking when it was not woken', async () => {
+    const { handler, emails } = setUp({ lines: [codeError], fire: { ok: false, status: 500 } })
+
+    await handler(alarm('animitta-handler-failures'))
+
+    expect(emails()[0].Message).toContain('這次沒有叫到 Claude')
+    expect(emails()[0].Message).not.toContain('Claude 正在查，需要改程式')
   })
 })

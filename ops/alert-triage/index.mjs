@@ -2,12 +2,17 @@ import { CloudWatchLogsClient, FilterLogEventsCommand } from '@aws-sdk/client-cl
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb'
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns'
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
-import { summarize, needsClaude, explain } from './summary.mjs'
+import { summarize, needsClaude, forClaude, explain } from './summary.mjs'
 
 // The bot's alarms this reads, the log lines behind each, and how far back
 // those lines can be from the moment the alarm went off.
 const ALARMS = {
-  'animitta-handler-failures': { pattern: '?"Handler error" ?"Task timed out"', lookbackMinutes: 10 },
+  // The last three are the Lambda runtime's own lines when the code cannot load
+  // or the process dies, which the alarm counts as uncaught errors.
+  'animitta-handler-failures': {
+    pattern: '?"Handler error" ?"Task timed out" ?"Invoke Error" ?"Runtime.ImportModuleError" ?"Runtime.UserCodeSyntaxError" ?"Runtime exited"',
+    lookbackMinutes: 10,
+  },
   'animitta-answered-by-backup': { pattern: '"Provider fallback"', lookbackMinutes: 65 },
 }
 const QUIET_HOURS = 6
@@ -89,7 +94,9 @@ export function makeHandler({ logs, db, sns, ssm, fetch, env, now = Date.now }) 
         await release('ROUTINE')
         return { failed: `HTTP ${res.status}` }
       }
-      return { url: (await res.json()).claude_code_session_url }
+      // Started either way; only the link may be missing.
+      const session = await res.json().then((body) => body.claude_code_session_url, () => null)
+      return { url: session, started: true }
     } catch (err) {
       await release('ROUTINE')
       return { failed: err.name ?? 'error' }
@@ -105,16 +112,22 @@ export function makeHandler({ logs, db, sns, ssm, fetch, env, now = Date.now }) 
       const causes = summarize(await failureLines(pattern, window.from, window.to))
       const onBackup = alarm.name === 'animitta-answered-by-backup'
 
+      const quietKeys = causes.length ? causes.map((cause) => `EMAIL#${cause.signature}`) : ['EMAIL#none']
       const fresh = []
-      for (const cause of causes) if (await firstIn(`EMAIL#${cause.signature}`)) fresh.push(cause)
-      if (causes.length && !fresh.length) continue
+      for (const key of quietKeys) if (await firstIn(key)) fresh.push(key)
+      if (!fresh.length) continue
 
       const claude = !onBackup && needsClaude(causes) ? await wakeClaude(alarm.name, causes, isoWindow(window)) : null
       // Only counts and causes, never the lines themselves.
       console.log(JSON.stringify({ alarm: alarm.name, causes: causes.map(({ signature, count }) => ({ signature, count })), claude }))
-      await sns.send(
-        new PublishCommand({ TopicArn: env.TRIAGE_TOPIC_ARN, Subject: subjectOf(alarm.name, causes), Message: bodyOf(alarm, causes, onBackup, claude) })
-      )
+      try {
+        await sns.send(
+          new PublishCommand({ TopicArn: env.TRIAGE_TOPIC_ARN, Subject: subjectOf(alarm.name, causes), Message: bodyOf(alarm, causes, onBackup, claude) })
+        )
+      } catch (err) {
+        for (const key of fresh) await release(key)
+        throw err
+      }
     }
   }
 }
@@ -153,11 +166,13 @@ function bodyOf(alarm, causes, onBackup, claude) {
     if (i > 0) lines.push('', '另外：')
     lines.push(`發生什麼事：${step.what}`)
     lines.push(`使用者看到：${onBackup ? '照常收到回覆，是 Bedrock 備援回的。' : step.users}`)
-    lines.push(`你要做的：${step.action}${step.phone ? '（手機可以處理）' : '（需要電腦）'}`)
+    const action = forClaude(cause) && !claude?.started ? '這次沒有叫到 Claude（原因在信末），請到 CloudWatch Logs /aws/lambda/animitta 看，或請 Claude 查。' : step.action
+    lines.push(`你要做的：${action}${step.phone ? '（手機可以處理）' : '（需要電腦）'}`)
     lines.push(`次數：${cause.count} 次（${taipei(cause.first)}–${taipei(cause.last)}）`)
   })
   lines.push('')
   if (claude?.url) lines.push(`Claude 正在查：${claude.url}`)
+  else if (claude?.started) lines.push('Claude 已經開始查，但沒拿到連結：到 claude.ai/code 看最新的工作階段。')
   else if (claude?.skipped) lines.push(`Claude 這次沒叫：${claude.skipped}。`)
   else if (claude?.failed) lines.push(`叫 Claude 失敗（${claude.failed}）。如果是 401，排程任務的 token 可能失效了，要你重產一把。`)
   else lines.push('沒有叫 Claude：這類原因改程式修不好。')

@@ -32,7 +32,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          changed=$(git diff --name-only "$BASE" "$HEAD")
+          changed=$(git diff --name-only "$BASE...$HEAD")
           if echo "$changed" | grep -q '^\.github/'; then
             echo "::warning::This PR changes GitHub Actions workflows. Read them closely before merging."
           fi

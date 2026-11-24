@@ -1,19 +1,37 @@
-// Turns the bot's failure lines into a summary built only from tokens this
-// file recognises: status codes, documented error types, error class names,
-// and file:line of the bot's own code. Nothing else in a line is kept, so what
+// Turns the bot's failure lines into a summary built only from values this
+// file lists: status codes, documented error types, known error classes, and
+// file:line of the bot's own code. Nothing else in a line is kept, so what
 // someone typed, or text written to steer Claude, never leaves the log.
 
-const PROVIDER = /(Anthropic|OpenAI|Bedrock) (chat|summary) failed: (\d{3}|no response)(?: ([A-Za-z_]{3,60}))?/
+// Anthropic's documented error types and codes, and Bedrock's exception names.
+const TYPES = new Set([
+  'invalid_request_error', 'authentication_error', 'billing_error', 'permission_error', 'not_found_error',
+  'conflict_error', 'request_too_large', 'rate_limit_error', 'api_error', 'timeout_error', 'overloaded_error',
+  'enforced_spend_limit_reached', 'ramp_limit_exceeded',
+  'AccessDeniedException', 'ThrottlingException', 'ValidationException', 'ServiceUnavailableException',
+  'ModelNotReadyException', 'ModelTimeoutException', 'ModelErrorException', 'InternalServerException',
+  'ResourceNotFoundException', 'ServiceQuotaExceededException', 'SdkMissing',
+])
+const ERROR_CLASSES = new Set([
+  'TypeError', 'ReferenceError', 'SyntaxError', 'RangeError', 'URIError', 'AggregateError',
+  'ImportModuleError', 'UserCodeSyntaxError', 'ValidationException', 'ConditionalCheckFailedException',
+  'ResourceNotFoundException', 'ProvisionedThroughputExceededException', 'ThrottlingException',
+  'TransactionCanceledException', 'AccessDeniedException', 'InternalServerError',
+])
+const listed = (set, value) => (set.has(value) ? value : null)
+
+const PROVIDER = /(Anthropic|OpenAI|Bedrock) (chat|summary) failed: (\d{3}|no response|unreadable reply)(?: ([A-Za-z_]{3,60}))?/
 const ABORTED = /aborted due to timeout|\b(TimeoutError|AbortError)\b/
 const LINE_CALL = /LINE (link rich menu|loading indicator|content download|reply|quick reply) failed: (\d{3})/
 const REFUSED = /Anthropic chat (refused|returned no text)/
 const LAMBDA_TIMEOUT = /Task timed out after [\d.]{1,8} seconds/
+const RUNTIME_EXIT = /Runtime exited/
 const DEADLINE = /\b(TimeoutError|AbortError)\b/
 const VOICE_PAUSED = /voice paused, the recording was not sent to Amazon/
 const VOICE_REFUND = /voice seconds not given back/
 const TRANSCRIBE = /Transcription (failed|was not done by the deadline)/
 const ERROR_CLASS = /\b([A-Z][A-Za-z]{2,40}(?:Error|Exception))\b/
-const FRAME = /\/var\/task\/([\w/.-]{1,80}\.mjs):(\d{1,5})/g
+const FRAME = /\/var\/task\/((?:services\/|providers\/)?[a-z][a-z0-9-]{1,30}\.mjs):(\d{1,5})/g
 
 // One cause per line, the most specific first.
 export function causeOf(line) {
@@ -26,19 +44,21 @@ export function causeOf(line) {
       kind: 'provider',
       service: primary?.[1] ?? 'Anthropic',
       status: primary?.[3] ?? (ABORTED.test(primaryPart) ? 'timeout' : 'unknown'),
-      type: primary?.[4] ?? null,
-      backup: backup ? [backup[3], backup[4]].filter(Boolean).join(' ') : null,
+      type: listed(TYPES, primary?.[4]),
+      backup: backup ? [backup[3], listed(TYPES, backup[4])].filter(Boolean).join(' ') : null,
     }
   }
   const line_ = line.match(LINE_CALL)
   if (line_) return { kind: 'line', call: line_[1], status: line_[2] }
   if (REFUSED.test(line)) return { kind: 'refused' }
   if (LAMBDA_TIMEOUT.test(line)) return { kind: 'lambda-timeout' }
+  if (RUNTIME_EXIT.test(line)) return { kind: 'runtime-exit' }
   if (VOICE_PAUSED.test(line)) return { kind: 'voice-paused' }
   if (VOICE_REFUND.test(line)) return { kind: 'voice-refund' }
   if (TRANSCRIBE.test(line)) return { kind: 'transcribe' }
   if (DEADLINE.test(line)) return { kind: 'deadline' }
-  const errorClass = line.match(ERROR_CLASS)?.[1]
+  const found = line.match(ERROR_CLASS)?.[1]
+  const errorClass = found ? (listed(ERROR_CLASSES, found) ?? 'OtherError') : null
   const frames = [...new Set([...line.matchAll(FRAME)].map(([, file, at]) => `${file}:${at}`))].slice(0, 3)
   if (errorClass || frames.length) return { kind: 'code', errorClass: errorClass ?? null, frames }
   return { kind: 'unknown' }
@@ -67,9 +87,11 @@ export function summarize(events) {
   return [...causes.values()].sort((a, b) => b.count - a.count)
 }
 
-// Causes a person has to act on outside the code; Claude cannot fix these.
-const EXTERNAL = new Set(['provider', 'line', 'refused', 'voice-paused', 'deadline'])
-export const needsClaude = (causes) => causes.some((cause) => !EXTERNAL.has(cause.kind))
+// Causes that may need a code change. The rest are for a person outside the
+// code, or pass by themselves, and would only use up Claude's quiet hours.
+const CODE_SHAPED = new Set(['code', 'lambda-timeout', 'runtime-exit', 'unknown'])
+export const needsClaude = (causes) => causes.some((cause) => CODE_SHAPED.has(cause.kind))
+export const forClaude = (cause) => CODE_SHAPED.has(cause.kind)
 
 // What happened, what people saw, and the one step for Eric. phone: the step
 // can be done from a phone; otherwise it needs his computer.
@@ -87,6 +109,8 @@ export function explain(cause) {
       return step('AI 在 55 秒內沒答完。', '使用者收到道歉。', '多半是 AI 服務很慢，先等等看。', true)
     case 'lambda-timeout':
       return step('函式跑超過 90 秒被停掉。', '使用者沒收到任何回覆。', 'Claude 正在查是哪一段太慢。', true)
+    case 'runtime-exit':
+      return step('函式的執行環境整個掛掉了（例如記憶體不夠，或程式一載入就出錯）。', '使用者沒收到任何回覆。', 'Claude 正在查。', true)
     case 'voice-paused':
       return step('語音暫停了：AWS 帳號「AI 服務不拿資料改進服務」的設定沒有生效。', '傳語音的人收到請改用打字的回覆。', '到 AWS Organizations 檢查 AI 服務退出政策。', false)
     case 'voice-refund':
