@@ -153,6 +153,7 @@ export class AnimittaStack extends cdk.Stack {
     if (BEDROCK_MODEL_ID) this.addBackupAlarm(fn, alertTopic)
     this.addKeyExpiryReminders(alertTopic, process.env.ANTHROPIC_KEY_EXPIRES_ON)
     this.addAlertTriage(fn, table, alertTopic, alertEmail)
+    this.addDeployRole(fn, alertTopic)
   }
 
   // index.mjs catches errors and returns 200, so Lambda's own Errors metric
@@ -297,6 +298,45 @@ export class AnimittaStack extends cdk.Stack {
     )
   }
 
+  // GitHub Actions deploys lambda/ once Eric approves the production
+  // environment. The role trusts only jobs in that environment, so changing the
+  // workflow cannot skip his approval. Replacing the code means running as the
+  // bot, with its data and keys, which is why that approval is the gate.
+  private addDeployRole(bot: lambda.Function, alertTopic: sns.ITopic) {
+    const github = iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
+      this,
+      'GitHubOidc',
+      `arn:aws:iam::${this.account}:oidc-provider/token.actions.githubusercontent.com`
+    )
+    const role = new iam.Role(this, 'GitHubDeployRole', {
+      roleName: 'animitta-github-deploy',
+      maxSessionDuration: cdk.Duration.hours(1),
+      assumedBy: new iam.WebIdentityPrincipal(github.openIdConnectProviderArn, {
+        StringEquals: {
+          'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+          'token.actions.githubusercontent.com:sub': 'repo:ceparadise168/animitta:environment:production',
+        },
+      }),
+    })
+    // GetFunctionConfiguration is for the wait after an update; its answer, like
+    // UpdateFunctionCode's, carries the bot's keys, so the workflow prints neither.
+    role.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['lambda:UpdateFunctionCode', 'lambda:GetFunctionConfiguration', 'lambda:InvokeFunction'],
+        resources: [bot.functionArn],
+      })
+    )
+    role.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/animitta/deployed`],
+      })
+    )
+    alertTopic.grantPublish(role)
+    new cdk.CfnOutput(this, 'GitHubDeployRoleArn', { value: role.roleArn })
+    new cdk.CfnOutput(this, 'AlertTopicArn', { value: alertTopic.topicArn })
+  }
+
   private addKeyExpiryReminders(topic: sns.ITopic, expiresOn: string | undefined) {
     if (!expiresOn) return
     if (!/^\d{4}-\d{2}-\d{2}$/.test(expiresOn)) {
@@ -318,7 +358,7 @@ export class AnimittaStack extends cdk.Stack {
               '換 key 的步驟：\n' +
               '1. 到 Anthropic Console 產生新的 key\n' +
               '2. 在 ~/workspace/vibe-coding/animitta/.env 更新 ANTHROPIC_API_KEY 和 ANTHROPIC_KEY_EXPIRES_ON\n' +
-              '3. 在同一個資料夾執行 npx cdk deploy\n\n' +
+              '3. 在同一個資料夾執行 npm run deploy\n\n' +
               '要改 .env 再部署,不要只改 Lambda Console，不然下次部署會把舊的 key 蓋回去。',
           ),
         }),

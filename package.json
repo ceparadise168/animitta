@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node --experimental-vm-modules node_modules/.bin/jest --forceExit",
     "cdk": "cdk",
-    "deploy": "cdk deploy",
+    "deploy": "node scripts/deploy.mjs",
     "synth": "cdk synth"
   },
   "devDependencies": {

@@ -48,6 +48,7 @@ LINE App → Lambda Function URL → Lambda (Node.js 22.x) → OpenAI / Anthropi
 - Self-test: `aws lambda invoke --function-name animitta --payload '{"selfTest":true}' --cli-binary-format raw-in-base64-out out.json` asks Anthropic and the backup a one-word question and checks a LINE signature with the real secret, then writes `{"anthropic":"ok","bedrock":"ok","signature":"ok"}` or the failure messages. Only a direct invoke runs it; requests through the webhook URL carry `requestContext` and never do
 - Alerts: failed replies email `ALERT_EMAIL`; reminders go out before `ANTHROPIC_KEY_EXPIRES_ON`
 - Alert triage: `animitta-alert-triage` reads the failure lines behind each alarm and emails `ALERT_EMAIL` (its own topic, confirmed once) the cause, what users saw, and the one step to take, once per cause in six hours. It keeps only status codes, documented error types, error class names and file:line of the bot's code, so nothing a user typed leaves the log. For a code error or a cause it cannot name, it also wakes a Claude Code routine (URL and token in SSM `/animitta/alert-routine/*`, at most once in six hours) with that summary and the commit that runs; the email links the session
+- Delivery: a PR runs `test` (required by the ruleset on main) and `deploy-scope`, which fails when cdk/ or ops/ changed, since a merge does not deploy those. A merge that changes lambda/ runs `deploy`, which waits for Eric to approve the `production` environment; the AWS role it assumes trusts only jobs in that environment. It refuses an old commit, and refuses while cdk/ or ops/ on main differ from what `npm run deploy` last put up (SSM `/animitta/deployed`). It uploads lambda/, runs the self-test and an unsigned webhook request, records the commit, and on any failure puts back the code that was live and emails. Every `aws lambda` call in a workflow prints only the field it asks for: Lambda's answers carry the bot's keys and the Actions logs are public (`scripts/check-workflows.mjs` enforces it)
 
 ## Quick Start
 
@@ -73,7 +74,7 @@ cp .env.example .env
 
 # Deploy
 npx cdk bootstrap  # First time only
-npx cdk deploy --app "npx ts-node --prefer-ts-exts cdk/bin/app.ts"
+npm run deploy     # only from the latest main with nothing uncommitted
 
 # Set up Rich Menu
 node scripts/setup-richmenu.mjs
