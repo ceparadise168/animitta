@@ -119,6 +119,9 @@ function explainPrimary({ service, status, type, backup }) {
     const where = service === 'Anthropic' ? 'platform.claude.com' : '服務的主控台'
     return step(`${failed}：金鑰失效或被撤銷。`, seen, `到 ${where} 產生新金鑰，改 .env 後部署（你手動）。`, false)
   }
+  if (type === 'enforced_spend_limit_reached') {
+    return step(`${failed}：本月的用量上限到了，要等到下個月才會恢復。`, seen, '到 platform.claude.com 的 Limits 頁看上限，需要的話申請提高用量等級。', true)
+  }
   if (type === 'billing_error' || (status === '400' && type === 'invalid_request_error')) {
     return step(`${failed}：多半是儲值用完。`, seen, '到 platform.claude.com/settings/billing 看餘額、加值。', true)
   }

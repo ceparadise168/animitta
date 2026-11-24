@@ -26,6 +26,10 @@ const CHAT_MODEL_ANTHROPIC = process.env.CHAT_MODEL_ANTHROPIC || 'claude-haiku-4
 if (BEDROCK_MODEL_ID && !BEDROCK_MODEL_ID.includes(CHAT_MODEL_ANTHROPIC)) {
   throw new Error(`BEDROCK_MODEL_ID ${BEDROCK_MODEL_ID} is not the chat model ${CHAT_MODEL_ANTHROPIC}`)
 }
+// It also says Japan, and the permission below covers only Japan's regions.
+if (BEDROCK_MODEL_ID && !BEDROCK_MODEL_ID.startsWith('jp.')) {
+  throw new Error(`BEDROCK_MODEL_ID ${BEDROCK_MODEL_ID} is not a jp. profile`)
+}
 const CONVERSATION_TTL_DAYS = Number(process.env.CONVERSATION_TTL_DAYS || '30')
 if (!Number.isInteger(CONVERSATION_TTL_DAYS) || CONVERSATION_TTL_DAYS < 1) {
   throw new Error(`CONVERSATION_TTL_DAYS must be a whole number of days, got ${process.env.CONVERSATION_TTL_DAYS}`)

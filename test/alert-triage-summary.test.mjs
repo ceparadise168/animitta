@@ -67,6 +67,12 @@ describe('alert triage summary', () => {
     expect(explain(causeOf('Anthropic chat failed: 400 invalid_request_error')).phone).toBe(true)
   })
 
+  it('reads the monthly spend cap as lasting until next month', () => {
+    const step = explain(causeOf('Anthropic chat failed: 429 enforced_spend_limit_reached; backup: Bedrock chat failed: 403 AccessDeniedException'))
+
+    expect(step.what).toContain('本月的用量上限到了')
+  })
+
   it('also tells him when the backup is not switched on', () => {
     const step = explain(causeOf('Anthropic chat failed: 529 overloaded_error; backup: Bedrock chat failed: 403 AccessDeniedException'))
 

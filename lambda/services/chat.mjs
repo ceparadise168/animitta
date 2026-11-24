@@ -26,8 +26,10 @@ export async function handleText(userId, replyToken, userText, sentAt, { onRepli
   let context, reply
   try {
     context = await getContext(userId)
+    const budget = answerWithin(sentAt)
     const { text } = await provider.chatCompletion(buildMessages({ ...context, userInput: userText }), {
-      signal: AbortSignal.timeout(answerWithin(sentAt)),
+      signal: AbortSignal.timeout(budget),
+      deadline: Date.now() + budget,
     })
     reply = stripMarkdown(text)
     await replyMessage(replyToken, before ? [before, reply] : reply)

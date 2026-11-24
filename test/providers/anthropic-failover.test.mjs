@@ -83,6 +83,82 @@ describe('AnthropicProvider when Anthropic fails', () => {
     expect(backup.send).not.toHaveBeenCalled()
   })
 
+  it('moves to the backup when the monthly spend cap is reached, which lasts until next month', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: { type: 'rate_limit_error', message: 'monthly threshold', details: { error_code: 'enforced_spend_limit_reached' } } }),
+    })
+    backup.send.mockResolvedValueOnce(reply('備援的回覆'))
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    const provider = new AnthropicProvider({ backup, retryPauseMs: 0 })
+
+    await expect(provider.chatCompletion(ask)).resolves.toEqual({ text: '備援的回覆' })
+    expect(warn).toHaveBeenCalledWith('Provider fallback: Anthropic chat failed: 429 enforced_spend_limit_reached -> Bedrock chat ok')
+    warn.mockRestore()
+  })
+
+  it('keeps the apology for a ramp limit, which passes within seconds', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: { type: 'rate_limit_error', details: { error_code: 'ramp_limit_exceeded' } } }),
+    })
+    const provider = new AnthropicProvider({ backup, retryPauseMs: 0 })
+
+    await expect(provider.chatCompletion(ask)).rejects.toThrow('Anthropic chat failed: 429 ramp_limit_exceeded')
+    expect(backup.send).not.toHaveBeenCalled()
+  })
+
+  it('never passes on fetch\'s own message, which can quote the key', async () => {
+    mockFetch.mockRejectedValue(new TypeError('Headers.append: "sk-ant-secret\nrest" is an invalid header value.'))
+    const provider = new AnthropicProvider({ backup: null, retryPauseMs: 0 })
+
+    const err = await provider.chatCompletion(ask).catch((e) => e)
+
+    expect(err.message).toBe('Anthropic chat failed: no response')
+    expect(err.message).not.toContain('sk-ant')
+  })
+
+  it('treats a reply it cannot read as a failure, without quoting it', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token 我 in JSON') } })
+    backup.send.mockResolvedValueOnce(reply('備援的回覆'))
+    const provider = new AnthropicProvider({ backup, retryPauseMs: 0 })
+
+    await expect(provider.chatCompletion(ask)).resolves.toEqual({ text: '備援的回覆' })
+  })
+
+  it('sends a slow failure to the backup without asking Anthropic again', async () => {
+    mockFetch.mockResolvedValue(failed(529, 'overloaded_error'))
+    backup.send.mockResolvedValueOnce(reply('備援的回覆'))
+    const provider = new AnthropicProvider({ backup, retryPauseMs: 0, fastFailureMs: 0 })
+
+    await expect(provider.chatCompletion(ask)).resolves.toEqual({ text: '備援的回覆' })
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('with little time left, gives Anthropic only half of it, so the backup still answers', async () => {
+    mockFetch.mockImplementation((url, { signal }) => new Promise((_, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason))
+    }))
+    backup.send.mockResolvedValueOnce(reply('備援的回覆'))
+    const provider = new AnthropicProvider({ backup, retryPauseMs: 0 })
+
+    const answer = provider.chatCompletion(ask, { signal: AbortSignal.timeout(3_000), deadline: Date.now() + 3_000 })
+
+    await expect(answer).resolves.toEqual({ text: '備援的回覆' })
+  })
+
+  it('gives the backup its turn when a summary hangs at Anthropic', async () => {
+    mockFetch.mockImplementation((url, { signal }) => new Promise((_, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason))
+    }))
+    backup.send.mockResolvedValueOnce(reply('摘要'))
+    const provider = new AnthropicProvider({ backup, retryPauseMs: 0, summaryAttemptMs: 20 })
+
+    await expect(provider.summarize(null, [{ role: 'user', content: '最近很累' }])).resolves.toBe('摘要')
+  })
+
   it('goes straight to the backup when Anthropic rejects the key, without asking again', async () => {
     mockFetch.mockResolvedValueOnce(failed(401, 'authentication_error'))
     backup.send.mockResolvedValueOnce(reply('備援的回覆'))
@@ -176,6 +252,14 @@ describe('BedrockBackup', () => {
     expect(command.input.modelId).toBe('jp.anthropic.claude-haiku-4-5-20251001-v1:0')
     expect(JSON.parse(command.input.body)).toEqual({ anthropic_version: 'bedrock-2023-05-31', max_tokens: 1024, messages: [] })
     expect(options.abortSignal).toBe(signal)
+  })
+
+  it('names a reply it cannot read without quoting it', async () => {
+    const client = { send: jest.fn().mockResolvedValueOnce({ body: new TextEncoder().encode('not json: 使用者的話') }) }
+
+    const err = await new BedrockBackup('model', client).send('chat', {}, undefined).catch((e) => e)
+
+    expect(err.message).toBe('Bedrock chat failed: unreadable reply')
   })
 
   it('names a failure by status and error name only', async () => {

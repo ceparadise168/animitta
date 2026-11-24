@@ -8,6 +8,7 @@ const ERROR_TYPES = new Set([
   'billing_error',
   'permission_error',
   'not_found_error',
+  'conflict_error',
   'request_too_large',
   'rate_limit_error',
   'api_error',
@@ -17,12 +18,15 @@ const ERROR_TYPES = new Set([
 // Failures that tend to pass within a second or two, worth one more try when
 // they came back fast. A slow failure goes to the backup instead.
 const TEMPORARY_STATUSES = new Set([500, 502, 503, 504, 529])
-const FAST_FAILURE_MS = 5_000
-// Over Anthropic's rate limit: someone may be flooding the bot, and the backup
-// has no limit of its own, so these get the apology instead.
-const RATE_LIMITED = 429
+// Codes Anthropic documents in error.details.error_code for a 429.
+const ERROR_CODES = new Set(['enforced_spend_limit_reached', 'ramp_limit_exceeded'])
+// A 429 is usually a rate limit: someone may be flooding the bot, and the
+// backup has no limit of its own, so it gets the apology instead. The monthly
+// spend cap is a 429 too, but it lasts until next month, so that one moves on.
+const SPEND_CAP = 'enforced_spend_limit_reached'
 // Up to two summaries are written after the reply, which itself may take 55
-// seconds, and all of it has to end within the function's 90 seconds.
+// seconds, and all of it has to end within the function's 90 seconds. One try
+// at Anthropic gets about half, so a hung Anthropic leaves the backup time.
 const SUMMARY_BUDGET_MS = 15_000
 
 export class AnthropicProvider extends LlmProvider {
@@ -33,14 +37,20 @@ export class AnthropicProvider extends LlmProvider {
   #backup
   #retryPauseMs
   #chatAttemptMs
+  #fastFailureMs
+  #summaryAttemptMs
 
-  // chatAttemptMs: how long one try at Anthropic may take before the backup
+  // chatAttemptMs: the most one try at Anthropic may take before the backup
   // gets its turn, so a hung Anthropic does not use up the whole deadline.
-  constructor({ backup = bedrockFromEnv(), retryPauseMs = 1000, chatAttemptMs = 20_000 } = {}) {
+  // fastFailureMs: a failure quicker than this may be retried; a slower one
+  // goes to the backup.
+  constructor({ backup = bedrockFromEnv(), retryPauseMs = 1000, chatAttemptMs = 20_000, summaryAttemptMs = 7_000, fastFailureMs = 5_000 } = {}) {
     super()
     this.#backup = backup
     this.#retryPauseMs = retryPauseMs
     this.#chatAttemptMs = chatAttemptMs
+    this.#fastFailureMs = fastFailureMs
+    this.#summaryAttemptMs = summaryAttemptMs
     this.#apiKey = process.env.ANTHROPIC_API_KEY
     this.#chatModel =
       process.env.CHAT_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
@@ -49,20 +59,24 @@ export class AnthropicProvider extends LlmProvider {
       process.env.SUMMARY_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
   }
 
-  async chatCompletion(messages, { signal } = {}) {
+  // deadline: when the caller's signal fires (ms since epoch). With little
+  // time left, as after a long voice transcription, one try gets only half of
+  // it, so the backup still has the other half.
+  async chatCompletion(messages, { signal, deadline } = {}) {
     const { system, userMessages } = this.#extractSystem(messages)
     const body = { ...this.#chatTuning(), ...(system && { system }), messages: userMessages }
-    const data = await this.#send('chat', this.#chatModel, body, signal)
+    const attemptMs = () => (deadline ? Math.min(this.#chatAttemptMs, Math.max(1_000, (deadline - Date.now()) / 2)) : this.#chatAttemptMs)
+    const data = await this.#send('chat', this.#chatModel, body, signal, attemptMs)
     return { text: readReplyText(data) }
   }
 
   // Anthropic first, once more if the failure looks temporary, then the
   // backup: the same model on Amazon Bedrock, given the same request. The
   // signal is the caller's deadline; once it fires nothing more is tried.
-  async #send(op, model, body, signal) {
+  async #send(op, model, body, signal, attemptMs) {
     let failure
     for (let attempt = 1; attempt <= 2; attempt++) {
-      const attemptSignal = op === 'chat' ? withTimeout(signal, this.#chatAttemptMs) : signal
+      const attemptSignal = withTimeout(signal, attemptMs())
       const startedAt = Date.now()
       try {
         return await askAnthropic(op, this.#apiKey, model, body, attemptSignal)
@@ -70,12 +84,13 @@ export class AnthropicProvider extends LlmProvider {
         const gaveUp = attemptSignal?.aborted && !signal?.aborted
         failure = gaveUp ? Object.assign(new Error(`Anthropic ${op} failed: no response`), { cause: err }) : err
       }
-      const fast = Date.now() - startedAt < FAST_FAILURE_MS
+      const fast = Date.now() - startedAt < this.#fastFailureMs
       if (signal?.aborted || attempt === 2 || !fast || !isTemporary(failure)) break
       await pause(this.#retryPauseMs, signal)
       if (signal?.aborted) break
     }
-    if (!this.#backup || signal?.aborted || failure.status === RATE_LIMITED) throw failure
+    const rateLimited = failure.status === 429 && failure.code !== SPEND_CAP
+    if (!this.#backup || signal?.aborted || rateLimited) throw failure
     try {
       const data = await this.#backup.send(op, body, signal)
       // Counted by an alarm: people still get answers, but Anthropic is down.
@@ -122,7 +137,7 @@ export class AnthropicProvider extends LlmProvider {
       `需要壓縮的對話：\n${turnsText}`
 
     const body = { max_tokens: 1024, temperature: 0.3, messages: [{ role: 'user', content: prompt }] }
-    const data = await this.#send('summary', this.#summaryModel, body, signal)
+    const data = await this.#send('summary', this.#summaryModel, body, signal, () => this.#summaryAttemptMs)
     return data.content[0].text
   }
 
@@ -157,29 +172,42 @@ export class AnthropicProvider extends LlmProvider {
 }
 
 async function askAnthropic(op, apiKey, model, body, signal) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    signal,
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ model, ...body }),
-  })
+  let res
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      signal,
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ model, ...body }),
+    })
+  } catch (err) {
+    if (signal?.aborted) throw err
+    // fetch's own message can quote a header, and so the key: never pass it on.
+    throw Object.assign(new Error(`Anthropic ${op} failed: no response`), { network: true })
+  }
   if (!res.ok) throw await anthropicFailure(op, res)
-  return res.json()
+  try {
+    return await res.json()
+  } catch {
+    throw new Error(`Anthropic ${op} failed: unreadable reply`)
+  }
 }
 
 async function anthropicFailure(op, res) {
-  let type
+  let error
   try {
-    type = (await res.json())?.error?.type
+    error = (await res.json())?.error
   } catch {
     // A proxy's HTML error page, say: the status alone still names it.
   }
-  const named = ERROR_TYPES.has(type) ? ` ${type}` : ''
-  return Object.assign(new Error(`Anthropic ${op} failed: ${res.status}${named}`), { status: res.status })
+  const code = ERROR_CODES.has(error?.details?.error_code) ? error.details.error_code : undefined
+  const type = ERROR_TYPES.has(error?.type) ? error.type : undefined
+  const named = code ?? type
+  return Object.assign(new Error(`Anthropic ${op} failed: ${res.status}${named ? ` ${named}` : ''}`), { status: res.status, code })
 }
 
 function withTimeout(signal, ms) {
@@ -187,7 +215,7 @@ function withTimeout(signal, ms) {
 }
 
 function isTemporary(err) {
-  return TEMPORARY_STATUSES.has(err.status) || (err instanceof TypeError && err.message === 'fetch failed')
+  return TEMPORARY_STATUSES.has(err.status) || err.network === true
 }
 
 function pause(ms, signal) {
@@ -220,7 +248,9 @@ export class BedrockBackup {
     try {
       // Loaded on first use, so if the runtime ever lacked this module only
       // the backup would fail, never every message and its apology.
-      const { BedrockRuntimeClient, InvokeModelCommand } = await import('@aws-sdk/client-bedrock-runtime')
+      const sdk = await import('@aws-sdk/client-bedrock-runtime').catch(() => null)
+      if (!sdk) throw Object.assign(new Error('no SDK'), { name: 'SdkMissing' })
+      const { BedrockRuntimeClient, InvokeModelCommand } = sdk
       this.#client ??= new BedrockRuntimeClient({})
       res = await this.#client.send(
         new InvokeModelCommand({
@@ -237,7 +267,11 @@ export class BedrockBackup {
       const status = err.$metadata?.httpStatusCode
       throw Object.assign(new Error(`Bedrock ${op} failed: ${status ?? 'no response'}${name}`), { status })
     }
-    return JSON.parse(new TextDecoder().decode(res.body))
+    try {
+      return JSON.parse(new TextDecoder().decode(res.body))
+    } catch {
+      throw new Error(`Bedrock ${op} failed: unreadable reply`)
+    }
   }
 }
 
