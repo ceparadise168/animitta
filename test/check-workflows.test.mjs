@@ -26,6 +26,12 @@ describe('workflow check', () => {
     ['--debug', 'aws lambda invoke --function-name f out.json --query StatusCode --debug'],
     ['--query only in a comment', 'aws lambda update-function-code --zip-file fileb://a.zip # --query CodeSha256'],
     ['another command silenced instead', 'aws lambda update-function-code --zip-file fileb://a.zip; echo done > /dev/null'],
+    ['a # inside quotes before it', 'echo "step #1" && aws lambda get-function-configuration --function-name f'],
+    ['two --query, the last one wins', 'aws lambda get-function-configuration --function-name f --query CodeSha256 --query Environment'],
+    ['a query that returns more than the field', "aws lambda get-function-configuration --function-name f --query 'CodeSha256 && Environment'"],
+    ['the service name quoted', "aws 'lambda' get-function-configuration --function-name f"],
+    ['a call inside $(...) without --query', 'cfg=$(aws lambda get-function-configuration --function-name f)'],
+    ['a redirect that is only text', "aws lambda update-function-code --zip-file fileb://a.zip --description '> /dev/null'"],
   ])('flags %s', (_, text) => {
     expect(flagged(text)).toBe(true)
   })

@@ -7,10 +7,12 @@ import { summarize, needsClaude, forClaude, explain } from './summary.mjs'
 // The bot's alarms this reads, the log lines behind each, and how far back
 // those lines can be from the moment the alarm went off.
 const ALARMS = {
-  // The last three are the Lambda runtime's own lines when the code cannot load
-  // or the process dies, which the alarm counts as uncaught errors.
+  // From Invoke Error on: the Lambda runtime's own lines when the code throws
+  // outside the handler, cannot load, or the process dies, which the alarm
+  // counts as uncaught errors.
   'animitta-handler-failures': {
-    pattern: '?"Handler error" ?"Task timed out" ?"Invoke Error" ?"Runtime.ImportModuleError" ?"Runtime.UserCodeSyntaxError" ?"Runtime exited"',
+    pattern:
+      '?"Handler error" ?"Task timed out" ?"Invoke Error" ?"Uncaught Exception" ?"Unhandled Promise Rejection" ?"Runtime.ImportModuleError" ?"Runtime.UserCodeSyntaxError" ?"Runtime exited"',
     lookbackMinutes: 10,
   },
   'animitta-answered-by-backup': { pattern: '"Provider fallback"', lookbackMinutes: 65 },
@@ -112,7 +114,7 @@ export function makeHandler({ logs, db, sns, ssm, fetch, env, now = Date.now }) 
       const causes = summarize(await failureLines(pattern, window.from, window.to))
       const onBackup = alarm.name === 'animitta-answered-by-backup'
 
-      const quietKeys = causes.length ? causes.map((cause) => `EMAIL#${cause.signature}`) : ['EMAIL#none']
+      const quietKeys = causes.length ? causes.map((cause) => `EMAIL#${cause.signature}`) : [`EMAIL#none:${alarm.name}`]
       const fresh = []
       for (const key of quietKeys) if (await firstIn(key)) fresh.push(key)
       if (!fresh.length) continue

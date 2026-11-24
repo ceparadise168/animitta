@@ -18,6 +18,9 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,19 +32,27 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: node scripts/check-workflows.mjs
-      # Shown on the run page, where Eric approves: what this merge changes.
+      # Shown on the run page, where Eric approves: what goes live, compared
+      # with the last successful automatic deploy.
       - name: What this deploy changes
-        if: github.event_name == 'push'
         env:
-          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].head_sha // empty')
           {
-            echo "### Files changed since ${BEFORE:0:7}"
-            echo '```'
-            git diff --stat "$BEFORE" "$GITHUB_SHA"
-            echo '```'
-            if git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -q '^\.github/'; then
-              echo "**This changes GitHub Actions workflows. Read them before approving.**"
+            if [ -z "$last" ]; then
+              echo "### First automatic deploy: compare with what the last npm run deploy put up"
+              echo '```'
+              git log --oneline -10 -- lambda
+              echo '```'
+            else
+              echo "### Changed since the last successful automatic deploy (${last:0:7}); if npm run deploy ran later, that one is live"
+              echo '```'
+              git diff --stat "$last" "$GITHUB_SHA"
+              echo '```'
+              if git diff --name-only "$last" "$GITHUB_SHA" | grep -q '^\.github/'; then
+                echo "**This changes GitHub Actions workflows. Read them before approving.**"
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

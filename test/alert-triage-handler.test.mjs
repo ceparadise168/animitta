@@ -139,6 +139,31 @@ describe('alert triage', () => {
     expect(emails()[0].Message).toContain('找不到對應的錯誤行')
   })
 
+  it.each([
+    ['transcription', 'Handler error: Error: Transcription failed: media'],
+    ['an unusual Anthropic status', 'Handler error: Error: Anthropic chat failed: 404 not_found_error'],
+    ['a refusal', 'Handler error: Error: Anthropic chat refused: cyber'],
+    ['LINE', 'Handler error: Error: LINE reply failed: 500'],
+    ['the deadline', 'Handler error: TimeoutError: The operation was aborted due to timeout'],
+    ['a voice refund', 'Handler error: voice seconds not given back: 12 s for user (ThrottlingException)'],
+  ])('never says Claude is on it when %s did not wake Claude', async (_, line) => {
+    const { handler, fetch, emails } = setUp({ lines: [line] })
+
+    await handler(alarm('animitta-handler-failures'))
+
+    expect(fetch).not.toHaveBeenCalled()
+    expect(emails()[0].Message).not.toMatch(/Claude 會|Claude 正在/)
+  })
+
+  it('counts quiet hours for an alarm with no lines per alarm', async () => {
+    const { handler, emails } = setUp({ lines: [] })
+
+    await handler(alarm('animitta-handler-failures'))
+    await handler(alarm('animitta-answered-by-backup'))
+
+    expect(emails()).toHaveLength(2)
+  })
+
   it('wakes Claude when the runtime itself crashed', async () => {
     const { handler, fetch } = setUp({ lines: ['2026-11-24T09:00:00.000Z\tid\tERROR\tRuntime exited with error: signal: killed'] })
 

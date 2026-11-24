@@ -1,5 +1,7 @@
 import { describe, it, expect } from '@jest/globals'
-import { causeOf, summarize, needsClaude, explain } from '../ops/alert-triage/summary.mjs'
+import { readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
+import { causeOf, summarize, needsClaude, explain, BOT_FILES } from '../ops/alert-triage/summary.mjs'
 
 const at = (minute) => Date.UTC(2026, 10, 24, 8, minute)
 
@@ -26,6 +28,18 @@ describe('alert triage summary', () => {
 
     expect(summary).not.toMatch(/Ignore|PrintProcessEnv|SYSTEM-OVERRIDE|deploy\.yml/)
     expect(summary).toContain('OtherError')
+  })
+
+  it('knows exactly the files the bot has, and drops any other path', () => {
+    const files = (dir) => readdirSync(dir).flatMap((name) => (statSync(join(dir, name)).isDirectory() ? files(join(dir, name)).map((f) => `${name}/${f}`) : [name]))
+    expect([...BOT_FILES].sort()).toEqual(files('lambda').filter((f) => f.endsWith('.mjs')).sort())
+
+    const cause = causeOf('Handler error: TypeError: x\n    at a (file:///var/task/services/merge-without-review.mjs:1:1)\n    at b (file:///var/task/services/chat.mjs:30:5)')
+    expect(cause.frames).toEqual(['services/chat.mjs:30'])
+  })
+
+  it('names a limit Eric set himself', () => {
+    expect(explain(causeOf('Anthropic chat failed: 400 specified_limit_reached')).what).toContain('你在 Anthropic 自己設的用量上限到了')
   })
 
   it('names who failed when Anthropic and the backup both did', () => {

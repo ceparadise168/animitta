@@ -16,7 +16,7 @@ const cdkArgs = process.argv.slice(2)
 
 git('fetch', '--quiet', 'origin', 'main')
 const problems = []
-if (!/github\.com[:/]ceparadise168\/animitta(\.git)?$/.test(git('remote', 'get-url', 'origin'))) problems.push('origin is not github.com/ceparadise168/animitta')
+if (!/^(https:\/\/github\.com\/|git@github\.com:)ceparadise168\/animitta(\.git)?$/.test(git('remote', 'get-url', 'origin'))) problems.push('origin is not github.com/ceparadise168/animitta')
 if (git('rev-parse', '--abbrev-ref', 'HEAD') !== 'main') problems.push('this is not main')
 if (git('rev-parse', 'HEAD') !== git('rev-parse', 'origin/main')) problems.push('this is not the latest origin/main (git pull first)')
 if (git('status', '--porcelain')) problems.push('there are uncommitted changes')

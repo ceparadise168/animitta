@@ -204,7 +204,10 @@ async function anthropicFailure(op, res) {
   } catch {
     // A proxy's HTML error page, say: the status alone still names it.
   }
-  const code = ERROR_CODES.has(error?.details?.error_code) ? error.details.error_code : undefined
+  // A limit Eric set himself in the Console has no code, only this documented
+  // start of the message; it is named, never quoted.
+  const ownLimit = res.status === 400 && String(error?.message ?? '').startsWith('You have reached your specified API usage limits')
+  const code = ownLimit ? 'specified_limit_reached' : ERROR_CODES.has(error?.details?.error_code) ? error.details.error_code : undefined
   const type = ERROR_TYPES.has(error?.type) ? error.type : undefined
   const named = code ?? type
   return Object.assign(new Error(`Anthropic ${op} failed: ${res.status}${named ? ` ${named}` : ''}`), { status: res.status, code })
