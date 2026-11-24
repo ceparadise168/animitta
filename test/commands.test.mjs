@@ -68,24 +68,25 @@ describe('commands', () => {
     await handleCommand('user1', 'token1', '@關於')
 
     const text = mockReplyMessage.mock.calls[0][1]
-    expect(text).toContain('45 天沒來聊天，也會全部自動刪掉')
+    expect(text).toContain('45 天未互動自動清空')
     expect(text).toContain('「清除記憶」')
-    expect(text).toContain('Anthropic 的 Claude')
   })
 
-  it('tells users what their words are used for, and that encryption does not keep them from the AI service', async () => {
+  it('says what the memory is for, and promises encryption only in transit and at rest, because the AI service still reads the text', async () => {
     await handleCommand('user1', 'token1', '@關於')
 
     const text = mockReplyMessage.mock.calls[0][1]
-    expect(text).toContain('只用來讓它接得上話，不會拿去做別的事')
-    expect(text).toContain('都有加密，不過要產生回覆，你傳的文字還是會交給 AI 服務')
+    expect(text).toContain('記憶只用來接話')
+    expect(text).toContain('對話傳送與存放都加密')
+    expect(text).toMatch(/文字由 .+ 處理/)
+    expect(text).not.toContain('全程加密')
   })
 
   it('tells users their words may go to Amazon instead when the backup is on', async () => {
     await handleCommand('user1', 'token1', '@關於')
 
     expect(mockReplyMessage.mock.calls[0][1]).toContain(
-      '（平常是 Anthropic 的 Claude；Anthropic 那邊出狀況時，改由 Amazon 在日本的機房執行同一個 Claude 模型）處理'
+      '文字由 Anthropic 或 Amazon 日本機房的 Claude 處理（不用於訓練）'
     )
   })
 
@@ -93,8 +94,8 @@ describe('commands', () => {
     await handleCommand('user1', 'token1', '@關於')
 
     const text = mockReplyMessage.mock.calls[0][1]
-    expect(text).toContain('會先交給 Amazon 的語音辨識轉成文字，轉好就把錄音刪掉')
-    expect(text).toContain('每個月最多可以傳 25 分鐘')
+    expect(text).toContain('語音經 Amazon 轉文字後即刪')
+    expect(text).toContain('每月上限 25 分鐘')
   })
 
 

@@ -17,20 +17,16 @@ const CLEAR_FAILED_REPLY = '記憶還沒清乾淨，等一下再按一次「清�
 // With a backup configured, people's words may go to Amazon instead, so 關於 says so.
 const AI_SERVICE = {
   anthropic: process.env.BEDROCK_MODEL_ID
-    ? '平常是 Anthropic 的 Claude；Anthropic 那邊出狀況時，改由 Amazon 在日本的機房執行同一個 Claude 模型'
-    : 'Anthropic 的 Claude',
+    ? 'Anthropic 或 Amazon 日本機房的 Claude'
+    : 'Claude',
   openai: 'OpenAI 的 GPT',
 }[process.env.LLM_PROVIDER || 'openai']
 
 const ABOUT_MESSAGE =
-  '無相界是一個帶著金剛經視角的自在聊天空間。你可以抒發煩惱、問生活裡卡住的事，也可以單純想理解《金剛經》在說什麼。\n\n' +
-  '它不是籤詩機，也不是佛學講堂。金剛經在這裡比較像底色：需要時拿來照一下，不需要時就好好聊天。\n\n' +
-  '它會記得你最近跟它聊過的，下次才接得上；比較早的會整理成一段重點。這些記憶只用來讓它接得上話，不會拿去做別的事。\n\n' +
-  `想馬上清空，按選單的「清除記憶」就好；${RETENTION_DAYS} 天沒來聊天，也會全部自動刪掉。\n\n` +
-  `訊息在傳送和存放時都有加密，不過要產生回覆，你傳的文字還是會交給 AI 服務（${AI_SERVICE}）處理。\n\n` +
-  `傳語音的話，會先交給 Amazon 的語音辨識轉成文字，轉好就把錄音刪掉；每個月最多可以傳 ${VOICE_MINUTES_PER_MONTH} 分鐘。\n\n` +
-  '目前由我個人自費維護。如果你覺得有幫助，歡迎分享給朋友；若想將這份善意延續下去，也歡迎隨喜捐款給你支持的慈善團體。\n\n' +
-  '有任何建議，都歡迎寫信給我：erictu.engineer@gmail.com'
+  '無相界是一個帶著《金剛經》視角的自在聊天空間。不求籤、不說教，也不必先懂佛學——想聊日常、理思緒，或隨手讀一句經文都很歡迎！\n' +
+  `【記憶與隱私】 對話傳送與存放都加密，記憶只用來接話，${RETENTION_DAYS} 天未互動自動清空（或隨時按「清除記憶」）。文字由 ${AI_SERVICE} 處理（不用於訓練）；語音經 Amazon 轉文字後即刪，每月上限 ${VOICE_MINUTES_PER_MONTH} 分鐘。\n` +
+  '【緣起與維護】 這是我上一份工作時受公司理念啟發的個人專案，目前個人自費維護。覺得有幫助的話，歡迎分享給朋友，或隨喜捐款支持慈善團體！\n' +
+  '建議與聯繫：erictu.engineer@gmail.com'
 
 const COMMANDS = {
   '@隨意聊聊': (userId, replyToken, sentAt) => handleCasualChat(userId, replyToken, sentAt),
