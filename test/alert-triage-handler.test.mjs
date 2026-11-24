@@ -44,7 +44,7 @@ function setUp({ lines, fire = { ok: true, json: async () => ({ claude_code_sess
   const fetch = jest.fn().mockResolvedValue(fire)
   const handler = makeHandler({ logs, db, sns, ssm, fetch, env, now: () => NOW })
   const emails = () => sns.send.mock.calls.map(([command]) => command.input)
-  return { handler, db, fetch, emails, sns }
+  return { handler, db, fetch, emails, sns, logs }
 }
 
 const codeError = "Handler error: TypeError: Cannot read properties of undefined (reading '我好累')\n    at foldIntoSummary (file:///var/task/services/memory.mjs:172:31)"
@@ -162,6 +162,26 @@ describe('alert triage', () => {
     await handler(alarm('animitta-answered-by-backup'))
 
     expect(emails()).toHaveLength(2)
+  })
+
+  it('reads the runtime\'s own lines for code that throws outside the handler', async () => {
+    const { handler, logs } = setUp({ lines: [] })
+
+    await handler(alarm('animitta-handler-failures'))
+
+    const { filterPattern } = logs.send.mock.calls[0][0].input
+    expect(filterPattern).toContain('"Uncaught Exception"')
+    expect(filterPattern).toContain('"Unhandled Promise Rejection"')
+    expect(filterPattern).toContain('"Runtime exited"')
+  })
+
+  it('does not blame the cause for not waking Claude when the backup alarm went off', async () => {
+    const { handler, emails } = setUp({ lines: ['Provider fallback: something new -> Bedrock chat ok'] })
+
+    await handler(alarm('animitta-answered-by-backup'))
+
+    expect(emails()[0].Message).toContain('備援接手的警報不叫 Claude')
+    expect(emails()[0].Message).not.toContain('改程式修不好')
   })
 
   it('wakes Claude when the runtime itself crashed', async () => {

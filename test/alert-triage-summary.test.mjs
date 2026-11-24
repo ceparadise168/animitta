@@ -36,6 +36,7 @@ describe('alert triage summary', () => {
 
     const cause = causeOf('Handler error: TypeError: x\n    at a (file:///var/task/services/merge-without-review.mjs:1:1)\n    at b (file:///var/task/services/chat.mjs:30:5)')
     expect(cause.frames).toEqual(['services/chat.mjs:30'])
+    for (const file of BOT_FILES) expect(causeOf(`at x (file:///var/task/${file}:1:1)`).frames).toEqual([`${file}:1`])
   })
 
   it('names a limit Eric set himself', () => {

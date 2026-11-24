@@ -36,7 +36,7 @@ export function tokenize(line) {
       end()
     } else if (c === '#' && word === '' && !quoted) {
       break
-    } else if (OPERATOR.test(line.slice(i)) && !(c === '&' && line[i + 1] !== '&' && line[i + 1] !== '>')) {
+    } else if (OPERATOR.test(line.slice(i)) && !(c === '&' && word === '' && /[<>]$/.test(tokens.at(-1)?.text ?? ''))) {
       end()
       const op = line.slice(i).match(OPERATOR)[1]
       tokens.push({ text: op, op: true })
@@ -51,7 +51,7 @@ export function tokenize(line) {
 
 function lambdaCallProblem(command) {
   // `aws`, also as in `x=$(aws ...)`
-  const start = command.findIndex((t) => !t.op && /^(?:[A-Za-z_][A-Za-z0-9_]*=)?[$(`]*aws$/.test(t.text))
+  const start = command.findIndex((t) => !t.op && /(?:^|[=$(<`/])aws$/.test(t.text))
   if (start === -1) return null
   let i = start + 1
   while (i < command.length && command[i].text.startsWith('--')) i += FLAGS.has(command[i].text) || command[i].text.includes('=') ? 1 : 2
@@ -62,7 +62,9 @@ function lambdaCallProblem(command) {
     if (t.text === '--query') return [words[j + 1]?.text]
     return t.text.startsWith('--query=') ? [t.text.slice('--query='.length)] : []
   })
-  const quiet = words.some((t, j) => t.op && ['>', '1>', '&>'].includes(t.text) && words[j + 1]?.text === '/dev/null')
+  const captured = /[(`]aws$/.test(command[start].text)
+  const outs = words.flatMap((t, j) => (t.op && ['>', '1>', '&>', '>>'].includes(t.text) ? [words[j + 1]?.text] : []))
+  const quiet = !captured && outs.at(-1) === '/dev/null'
   if (queries.length === 1 && FIELDS.has(queries[0].replace(/\)+$/, ''))) return null
   if (queries.length === 0 && quiet) return null
   return 'ask for exactly one listed field with --query, or send the output to > /dev/null'
@@ -71,9 +73,10 @@ function lambdaCallProblem(command) {
 export function problemsIn(text, file) {
   const problems = []
   // A command continued over several lines with a trailing backslash is one call.
-  for (const line of text.replace(/\\\n\s*/g, ' ').split('\n')) {
+  for (const line of text.replace(/\r\n/g, '\n').replace(/\\\n\s*/g, ' ').split('\n')) {
     const tokens = tokenize(line)
-    if (tokens.some((t) => !t.quoted && /^(pull_request_target|workflow_run):?$/.test(t.text))) {
+    for (const t of tokens) if (t.quoted && /\baws\b/.test(t.text)) problems.push(...problemsIn(t.text, file))
+    if (tokens.some((t) => !t.quoted && /(^|[[{,])(pull_request_target|workflow_run)([\]},:]|$)/.test(t.text))) {
       problems.push(`${file}: ${line.trim()}: runs with this repo's secrets on code others control`)
     }
     let command = []

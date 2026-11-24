@@ -168,7 +168,11 @@ function bodyOf(alarm, causes, onBackup, claude) {
     if (i > 0) lines.push('', '另外：')
     lines.push(`發生什麼事：${step.what}`)
     lines.push(`使用者看到：${onBackup ? '照常收到回覆，是 Bedrock 備援回的。' : step.users}`)
-    const action = forClaude(cause) && !claude?.started ? '這次沒有叫到 Claude（原因在信末），請到 CloudWatch Logs /aws/lambda/animitta 看，或請 Claude 查。' : step.action
+    const action = onBackup && forClaude(cause)
+      ? '到 CloudWatch Logs /aws/lambda/animitta 搜尋 "Provider fallback" 看那一行。'
+      : forClaude(cause) && !claude?.started
+        ? '這次沒有叫到 Claude（原因在信末），請到 CloudWatch Logs /aws/lambda/animitta 看，或請 Claude 查。'
+        : step.action
     lines.push(`你要做的：${action}${step.phone ? '（手機可以處理）' : '（需要電腦）'}`)
     lines.push(`次數：${cause.count} 次（${taipei(cause.first)}–${taipei(cause.last)}）`)
   })
@@ -177,6 +181,7 @@ function bodyOf(alarm, causes, onBackup, claude) {
   else if (claude?.started) lines.push('Claude 已經開始查，但沒拿到連結：到 claude.ai/code 看最新的工作階段。')
   else if (claude?.skipped) lines.push(`Claude 這次沒叫：${claude.skipped}。`)
   else if (claude?.failed) lines.push(`叫 Claude 失敗（${claude.failed}）。如果是 401，排程任務的 token 可能失效了，要你重產一把。`)
+  else if (onBackup) lines.push('備援接手的警報不叫 Claude：使用者照常收到回覆。')
   else lines.push('沒有叫 Claude：這類原因改程式修不好。')
   return lines.join('\n')
 }

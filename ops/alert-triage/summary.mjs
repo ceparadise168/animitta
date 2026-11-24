@@ -38,7 +38,7 @@ const VOICE_PAUSED = /voice paused, the recording was not sent to Amazon/
 const VOICE_REFUND = /voice seconds not given back/
 const TRANSCRIBE = /Transcription (failed|was not done by the deadline)/
 const ERROR_CLASS = /\b([A-Z][A-Za-z]{2,40}(?:Error|Exception))\b/
-const FRAME = /\/var\/task\/([a-z/.-]{1,60}\.mjs):(\d{1,5})/g
+const FRAME = /\/var\/task\/([\w/.-]{1,60}\.mjs):(\d{1,5})/g
 
 // One cause per line, the most specific first.
 export function causeOf(line) {
