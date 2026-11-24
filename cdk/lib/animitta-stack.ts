@@ -152,6 +152,7 @@ export class AnimittaStack extends cdk.Stack {
     this.addVoiceLimitAlarm(fn, alertTopic)
     if (BEDROCK_MODEL_ID) this.addBackupAlarm(fn, alertTopic)
     this.addKeyExpiryReminders(alertTopic, process.env.ANTHROPIC_KEY_EXPIRES_ON)
+    this.addAlertTriage(fn, table, alertTopic, alertEmail)
   }
 
   // index.mjs catches errors and returns 200, so Lambda's own Errors metric
@@ -234,6 +235,66 @@ export class AnimittaStack extends cdk.Stack {
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     }).addAlarmAction(new cloudwatchActions.SnsAction(topic))
+  }
+
+  // On each alarm: name the cause in an email, and wake the Claude routine when
+  // the cause may need a code change. The email has a topic of its own, since
+  // this function listens to the alert topic.
+  private addAlertTriage(bot: lambda.Function, table: dynamodb.ITable, alertTopic: sns.ITopic, email: string) {
+    const triageTopic = new sns.Topic(this, 'TriageTopic', { displayName: '無相界警報說明' })
+    triageTopic.addSubscription(new subscriptions.EmailSubscription(email))
+    const param = (name: string) => `arn:aws:ssm:${this.region}:${this.account}:parameter/animitta/${name}`
+
+    const triage = new lambda.Function(this, 'AlertTriage', {
+      functionName: 'animitta-alert-triage',
+      runtime: lambda.Runtime.NODEJS_22_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.resolve(__dirname, '../../ops/alert-triage')),
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
+      retryAttempts: 0,
+      environment: {
+        TABLE: table.tableName,
+        BOT_LOG_GROUP: `/aws/lambda/${bot.functionName}`,
+        TRIAGE_TOPIC_ARN: triageTopic.topicArn,
+        ROUTINE_URL_PARAM: '/animitta/alert-routine/url',
+        ROUTINE_TOKEN_PARAM: '/animitta/alert-routine/token',
+        DEPLOYED_PARAM: '/animitta/deployed',
+      },
+    })
+    new logs.LogRetention(this, 'AlertTriageLogRetention', {
+      logGroupName: `/aws/lambda/${triage.functionName}`,
+      retention: logRetentionWithin(CONVERSATION_TTL_DAYS),
+    })
+    alertTopic.addSubscription(new subscriptions.LambdaSubscription(triage))
+    triageTopic.grantPublish(triage)
+    triage.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['logs:FilterLogEvents'],
+        resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/aws/lambda/${bot.functionName}:*`],
+      })
+    )
+    triage.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter'],
+        resources: [param('alert-routine/url'), param('alert-routine/token'), param('deployed')],
+      })
+    )
+    triage.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['kms:Decrypt'],
+        resources: ['*'],
+        conditions: { StringEquals: { 'kms:ViaService': `ssm.${this.region}.amazonaws.com` } },
+      })
+    )
+    // Only its own rows: the same table holds everyone's conversations.
+    triage.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:PutItem'],
+        resources: [table.tableArn],
+        conditions: { 'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['OPS#ALERT'] } },
+      })
+    )
   }
 
   private addKeyExpiryReminders(topic: sns.ITopic, expiresOn: string | undefined) {

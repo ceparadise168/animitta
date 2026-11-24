@@ -1,0 +1,132 @@
+// Turns the bot's failure lines into a summary built only from tokens this
+// file recognises: status codes, documented error types, error class names,
+// and file:line of the bot's own code. Nothing else in a line is kept, so what
+// someone typed, or text written to steer Claude, never leaves the log.
+
+const PROVIDER = /(Anthropic|OpenAI|Bedrock) (chat|summary) failed: (\d{3}|no response)(?: ([A-Za-z_]{3,60}))?/
+const ABORTED = /aborted due to timeout|\b(TimeoutError|AbortError)\b/
+const LINE_CALL = /LINE (link rich menu|loading indicator|content download|reply|quick reply) failed: (\d{3})/
+const REFUSED = /Anthropic chat (refused|returned no text)/
+const LAMBDA_TIMEOUT = /Task timed out after [\d.]{1,8} seconds/
+const DEADLINE = /\b(TimeoutError|AbortError)\b/
+const VOICE_PAUSED = /voice paused, the recording was not sent to Amazon/
+const VOICE_REFUND = /voice seconds not given back/
+const TRANSCRIBE = /Transcription (failed|was not done by the deadline)/
+const ERROR_CLASS = /\b([A-Z][A-Za-z]{2,40}(?:Error|Exception))\b/
+const FRAME = /\/var\/task\/([\w/.-]{1,80}\.mjs):(\d{1,5})/g
+
+// One cause per line, the most specific first.
+export function causeOf(line) {
+  // "<Anthropic's failure>; backup: <Bedrock's failure>" when both failed.
+  const [primaryPart, backupPart = ''] = line.split('; backup: ')
+  const primary = primaryPart.match(PROVIDER)
+  const backup = backupPart.match(PROVIDER)
+  if (primary || backup) {
+    return {
+      kind: 'provider',
+      service: primary?.[1] ?? 'Anthropic',
+      status: primary?.[3] ?? (ABORTED.test(primaryPart) ? 'timeout' : 'unknown'),
+      type: primary?.[4] ?? null,
+      backup: backup ? [backup[3], backup[4]].filter(Boolean).join(' ') : null,
+    }
+  }
+  const line_ = line.match(LINE_CALL)
+  if (line_) return { kind: 'line', call: line_[1], status: line_[2] }
+  if (REFUSED.test(line)) return { kind: 'refused' }
+  if (LAMBDA_TIMEOUT.test(line)) return { kind: 'lambda-timeout' }
+  if (VOICE_PAUSED.test(line)) return { kind: 'voice-paused' }
+  if (VOICE_REFUND.test(line)) return { kind: 'voice-refund' }
+  if (TRANSCRIBE.test(line)) return { kind: 'transcribe' }
+  if (DEADLINE.test(line)) return { kind: 'deadline' }
+  const errorClass = line.match(ERROR_CLASS)?.[1]
+  const frames = [...new Set([...line.matchAll(FRAME)].map(([, file, at]) => `${file}:${at}`))].slice(0, 3)
+  if (errorClass || frames.length) return { kind: 'code', errorClass: errorClass ?? null, frames }
+  return { kind: 'unknown' }
+}
+
+export const signatureOf = (cause) =>
+  [cause.kind, cause.service, cause.status, cause.type, cause.call, cause.errorClass, cause.frames?.[0]]
+    .filter(Boolean)
+    .join(':')
+
+// events: [{ timestamp, message }] from CloudWatch Logs.
+export function summarize(events) {
+  const causes = new Map()
+  for (const { timestamp, message } of events) {
+    const cause = causeOf(message)
+    const key = signatureOf(cause)
+    const seen = causes.get(key)
+    if (seen) {
+      seen.count++
+      seen.first = Math.min(seen.first, timestamp)
+      seen.last = Math.max(seen.last, timestamp)
+    } else {
+      causes.set(key, { ...cause, signature: key, count: 1, first: timestamp, last: timestamp })
+    }
+  }
+  return [...causes.values()].sort((a, b) => b.count - a.count)
+}
+
+// Causes a person has to act on outside the code; Claude cannot fix these.
+const EXTERNAL = new Set(['provider', 'line', 'refused', 'voice-paused', 'deadline'])
+export const needsClaude = (causes) => causes.some((cause) => !EXTERNAL.has(cause.kind))
+
+// What happened, what people saw, and the one step for Eric. phone: the step
+// can be done from a phone; otherwise it needs his computer.
+export function explain(cause) {
+  switch (cause.kind) {
+    case 'provider':
+      return explainProvider(cause)
+    case 'line':
+      return ['401', '403'].includes(cause.status)
+        ? step(`LINE 拒絕了呼叫（${cause.call}，${cause.status}），多半是 Channel access token 失效。`, '使用者沒收到回覆。', '到 LINE Developers 換一把 token，改 .env 後部署。', false)
+        : step(`LINE 的呼叫失敗（${cause.call}，${cause.status}）。`, '使用者可能沒收到回覆。', '多半是 LINE 那邊的問題，先等等看；一直出現再查。', true)
+    case 'refused':
+      return step('Claude 拒絕回答或沒有產生文字。', '使用者收到道歉。', '偶發可以不用管；一直出現，再請 Claude 看 prompt。', true)
+    case 'deadline':
+      return step('AI 在 55 秒內沒答完。', '使用者收到道歉。', '多半是 AI 服務很慢，先等等看。', true)
+    case 'lambda-timeout':
+      return step('函式跑超過 90 秒被停掉。', '使用者沒收到任何回覆。', 'Claude 正在查是哪一段太慢。', true)
+    case 'voice-paused':
+      return step('語音暫停了：AWS 帳號「AI 服務不拿資料改進服務」的設定沒有生效。', '傳語音的人收到請改用打字的回覆。', '到 AWS Organizations 檢查 AI 服務退出政策。', false)
+    case 'voice-refund':
+      return step('語音分鐘數沒退回成功（資料庫錯誤）。', '那個人這個月的語音額度可能少算了幾秒。', '偶發可以不用管。', true)
+    case 'transcribe':
+      return step('語音轉文字失敗或太慢。', '傳語音的人收到道歉。', '偶發可以不用管；一直出現，Claude 會查。', true)
+    case 'code':
+      return step(`看起來是程式錯誤（${[cause.errorClass, ...cause.frames].filter(Boolean).join('，')}）。`, '使用者收到道歉。', 'Claude 正在查，需要改程式會開 PR 給你。', true)
+    default:
+      return step('對照表認不出這個錯誤。', '使用者可能收到道歉。', 'Claude 正在查。', true)
+  }
+}
+
+function explainProvider(cause) {
+  const explained = explainPrimary(cause)
+  if (!cause.backup?.includes('AccessDenied')) return explained
+  return {
+    ...explained,
+    action: `${explained.action}另外，Bedrock 備援沒開通或權限不足：到 Bedrock 主控台確認 Claude Haiku 4.5 已開通。`,
+    phone: false,
+  }
+}
+
+function explainPrimary({ service, status, type, backup }) {
+  const alsoBackup = backup ? `，Bedrock 備援也失敗（${backup}）` : ''
+  const seen = '使用者收到道歉。'
+  if (status === 'timeout') return step(`${service} 超過 20 秒沒回${alsoBackup}。`, seen, '多半是服務很慢，通常會自己恢復。', true)
+  const failed = `${service} 失敗（${[status, type].filter(Boolean).join(' ')}）${alsoBackup}`
+  if (status === '401' || type === 'authentication_error') {
+    const where = service === 'Anthropic' ? 'platform.claude.com' : '服務的主控台'
+    return step(`${failed}：金鑰失效或被撤銷。`, seen, `到 ${where} 產生新金鑰，改 .env 後部署（你手動）。`, false)
+  }
+  if (type === 'billing_error' || (status === '400' && type === 'invalid_request_error')) {
+    return step(`${failed}：多半是儲值用完。`, seen, '到 platform.claude.com/settings/billing 看餘額、加值。', true)
+  }
+  if (status === '429') return step(`${failed}：超過用量上限。`, seen, '通常幾分鐘內恢復；一直出現就到主控台看用量上限。', true)
+  if (status === 'no response' || Number(status) >= 500) {
+    return step(`${failed}：服務暫時塞車或故障。`, seen, '通常會自己恢復；可以看 status.anthropic.com。', true)
+  }
+  return step(`${failed}。`, seen, 'Claude 會一起看。', true)
+}
+
+const step = (what, users, action, phone) => ({ what, users, action, phone })
