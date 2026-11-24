@@ -14,7 +14,13 @@ const CASUAL_CHAT_STARTERS = [
 
 const CLEAR_FAILED_REPLY = '記憶還沒清乾淨，等一下再按一次「清除記憶」好嗎'
 
-const AI_SERVICE = { anthropic: 'Anthropic 的 Claude', openai: 'OpenAI 的 GPT' }[process.env.LLM_PROVIDER || 'openai']
+// With a backup configured, people's words may go to Amazon instead, so 關於 says so.
+const AI_SERVICE = {
+  anthropic: process.env.BEDROCK_MODEL_ID
+    ? '平常是 Anthropic 的 Claude；Anthropic 那邊出狀況時，改由 Amazon 在日本的機房執行同一個 Claude 模型'
+    : 'Anthropic 的 Claude',
+  openai: 'OpenAI 的 GPT',
+}[process.env.LLM_PROVIDER || 'openai']
 
 const ABOUT_MESSAGE =
   '無相界是一個帶著金剛經視角的自在聊天空間。你可以抒發煩惱、問生活裡卡住的事，也可以單純想理解《金剛經》在說什麼。\n\n' +

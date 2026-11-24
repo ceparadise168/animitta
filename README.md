@@ -44,6 +44,8 @@ LINE App → Lambda Function URL → Lambda (Node.js 22.x) → OpenAI / Anthropi
 - Photos, videos, files, locations and audio links from outside LINE get a short "type or send voice instead" reply, which is remembered
 - Conversation memory: the last turns, plus an LLM-compressed summary for long-term context. After `SESSION_IDLE_HOURS` of silence a new session starts and the previous one comes back as background
 - Retention: a person's turns and summary are gone `CONVERSATION_TTL_DAYS` (30) days after their last message. Each turn expires that long after it was said, the summary that long after the latest exchange. 關於 quotes the number. The function's log group has the same retention, and a handler error is logged without the words that went unanswered. The voice minute counter is kept 40 days, so a month's quota holds
+- When Anthropic fails: a fast 5xx or 529, or a dropped connection, is tried once more; anything else except a rate limit (429) goes to the backup, the same Claude model on Amazon Bedrock (`BEDROCK_MODEL_ID`, a `jp.` profile that runs only in Tokyo and Osaka). One try at Anthropic gets at most 20 seconds, so a hung Anthropic still leaves the backup time before the 55-second deadline. A reply from the backup logs `Provider fallback: <Anthropic's failure>`, which the `animitta-answered-by-backup` alarm counts, since the failure alarm no longer sees it. 關於 says the backup exists while it is configured. Errors name only the status and the documented error type, never the API's own text
+- Self-test: `aws lambda invoke --function-name animitta --payload '{"selfTest":true}' --cli-binary-format raw-in-base64-out out.json` asks Anthropic and the backup a one-word question and checks a LINE signature with the real secret, then writes `{"anthropic":"ok","bedrock":"ok","signature":"ok"}` or the failure messages. Only a direct invoke runs it; requests through the webhook URL carry `requestContext` and never do
 - Alerts: failed replies email `ALERT_EMAIL`; reminders go out before `ANTHROPIC_KEY_EXPIRES_ON`
 
 ## Quick Start
@@ -85,6 +87,7 @@ See `.env.example` for all available configuration options.
 Key variables:
 - `LLM_PROVIDER`: `openai` or `anthropic`
 - `CHAT_MODEL_OPENAI`: Model for conversation (e.g., `gpt-4.1-mini`)
+- `BEDROCK_MODEL_ID`: The backup for Anthropic (default: `jp.anthropic.claude-haiku-4-5-20251001-v1:0`; empty turns it off). It must be the same model as `CHAT_MODEL_ANTHROPIC`, or synth fails, because 關於 tells users it is. The account has to accept Anthropic's first-time-use form in the Bedrock console first
 - `MAX_RECENT_TURNS`: Number of recent conversation turns to keep (default: 5)
 - `CONVERSATION_TTL_DAYS`: Days without a message after which everything remembered is deleted (default: 30). 關於 quotes it to users, and the function's log group uses it too
 - `VOICE_MINUTES_PER_MONTH`: Voice minutes each user may send a month (default: 30). 關於 quotes it to users

@@ -3,6 +3,7 @@ import { handleText, replyAndRemember } from './services/chat.mjs'
 import { handleVoice } from './services/voice.mjs'
 import { handleCommand, handlePostback, isCommand } from './commands.mjs'
 import { CRISIS_FALLBACK_REPLY, talksOfEndingLife } from './crisis.mjs'
+import { selfTest } from './self-test.mjs'
 
 const WELCOME_MESSAGE =
   '嗨～我是無相界 🌿\n\n' +
@@ -29,7 +30,13 @@ function stickerAsText({ keywords = [], text }) {
   return parts.length ? `（傳了一張貼圖：${parts.join('，')}）` : '（傳了一張貼圖）'
 }
 
+// A direct invoke by someone with AWS access, never a webhook: requests through
+// the function URL always carry requestContext.
+const isSelfTest = (event) => event?.selfTest === true && !event.requestContext
+
 export async function handler(event) {
+  if (isSelfTest(event)) return selfTest()
+
   const body = event.isBase64Encoded
     ? Buffer.from(event.body, 'base64').toString('utf-8')
     : event.body

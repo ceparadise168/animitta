@@ -17,6 +17,15 @@ const KEY_REMINDER_DAYS_BEFORE = [7, 1]
 // Everyone's voice minutes together each month, so a crowd cannot run up the
 // Transcribe bill (about US$0.006 a minute). voice.mjs enforces it.
 const VOICE_MINUTES_ALL_USERS = process.env.VOICE_MINUTES_ALL_USERS_PER_MONTH || '1500'
+// The same Claude model on Amazon Bedrock, run only in Japan's regions (Tokyo,
+// Osaka), answers when the Anthropic account cannot. Empty turns the backup off.
+const BEDROCK_MODEL_ID = process.env.BEDROCK_MODEL_ID ?? 'jp.anthropic.claude-haiku-4-5-20251001-v1:0'
+const BEDROCK_MODEL_REGIONS = ['ap-northeast-1', 'ap-northeast-3']
+const CHAT_MODEL_ANTHROPIC = process.env.CHAT_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
+// 關於 tells people the backup runs the same model, so it has to be true.
+if (BEDROCK_MODEL_ID && !BEDROCK_MODEL_ID.includes(CHAT_MODEL_ANTHROPIC)) {
+  throw new Error(`BEDROCK_MODEL_ID ${BEDROCK_MODEL_ID} is not the chat model ${CHAT_MODEL_ANTHROPIC}`)
+}
 const CONVERSATION_TTL_DAYS = Number(process.env.CONVERSATION_TTL_DAYS || '30')
 if (!Number.isInteger(CONVERSATION_TTL_DAYS) || CONVERSATION_TTL_DAYS < 1) {
   throw new Error(`CONVERSATION_TTL_DAYS must be a whole number of days, got ${process.env.CONVERSATION_TTL_DAYS}`)
@@ -72,7 +81,8 @@ export class AnimittaStack extends cdk.Stack {
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
         CHAT_MODEL_OPENAI: process.env.CHAT_MODEL_OPENAI || 'gpt-4.1-mini',
         SUMMARY_MODEL_OPENAI: process.env.SUMMARY_MODEL_OPENAI || 'gpt-4.1-mini',
-        CHAT_MODEL_ANTHROPIC: process.env.CHAT_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001',
+        CHAT_MODEL_ANTHROPIC,
+        BEDROCK_MODEL_ID,
         CHAT_EFFORT_ANTHROPIC: process.env.CHAT_EFFORT_ANTHROPIC || '',
         SUMMARY_MODEL_ANTHROPIC: process.env.SUMMARY_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001',
         LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
@@ -105,6 +115,20 @@ export class AnimittaStack extends cdk.Stack {
       })
     )
 
+    if (BEDROCK_MODEL_ID) {
+      const profileArn = `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/${BEDROCK_MODEL_ID}`
+      const model = BEDROCK_MODEL_ID.replace(/^[a-z]+\./, '')
+      fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['bedrock:InvokeModel'], resources: [profileArn] }))
+      // The model itself only through that profile, which keeps it in Japan.
+      fn.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['bedrock:InvokeModel'],
+          resources: BEDROCK_MODEL_REGIONS.map((region) => `arn:aws:bedrock:${region}::foundation-model/${model}`),
+          conditions: { StringEquals: { 'bedrock:InferenceProfileArn': profileArn } },
+        })
+      )
+    }
+
     new logs.LogRetention(this, 'HandlerLogRetention', {
       logGroupName: `/aws/lambda/${fn.functionName}`,
       retention: logRetentionWithin(CONVERSATION_TTL_DAYS),
@@ -126,6 +150,7 @@ export class AnimittaStack extends cdk.Stack {
 
     this.addFailureAlarm(fn, alertTopic)
     this.addVoiceLimitAlarm(fn, alertTopic)
+    if (BEDROCK_MODEL_ID) this.addBackupAlarm(fn, alertTopic)
     this.addKeyExpiryReminders(alertTopic, process.env.ANTHROPIC_KEY_EXPIRES_ON)
   }
 
@@ -180,6 +205,30 @@ export class AnimittaStack extends cdk.Stack {
         `無相界這個月全體使用者的語音分鐘數（${VOICE_MINUTES_ALL_USERS} 分鐘）用完了：語音會暫停到下個月 1 號（台北時間），打字聊天照常。` +
         '要提高上限，改 VOICE_MINUTES_ALL_USERS_PER_MONTH 再部署。',
       metric: turnedAway,
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(new cloudwatchActions.SnsAction(topic))
+  }
+
+  // The backup answering hides Anthropic being down from the failure alarm, so
+  // a key or billing problem could last for weeks unseen. This one says so.
+  private addBackupAlarm(fn: lambda.Function, topic: sns.ITopic) {
+    const answeredByBackup = new logs.MetricFilter(this, 'BackupFilter', {
+      logGroup: logs.LogGroup.fromLogGroupName(this, 'BackupLogs', `/aws/lambda/${fn.functionName}`),
+      filterPattern: logs.FilterPattern.anyTerm('Provider fallback'),
+      metricNamespace: 'Animitta',
+      metricName: 'AnsweredByBackup',
+      metricValue: '1',
+    }).metric({ statistic: 'Sum', period: cdk.Duration.hours(1) })
+
+    new cloudwatch.Alarm(this, 'BackupAlarm', {
+      alarmName: 'animitta-answered-by-backup',
+      alarmDescription:
+        '不急：Anthropic 出了問題，這一小時內有訊息改由 Amazon Bedrock 上的同一個 Claude 回覆，使用者照常收到回覆。' +
+        '到 CloudWatch Logs /aws/lambda/animitta 搜尋 "Provider fallback"，那一行寫著 Anthropic 回的狀態碼：401 是金鑰失效，400 多半是儲值用完，529 或 5xx 是 Anthropic 塞車。',
+      metric: answeredByBackup,
       threshold: 1,
       evaluationPeriods: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,

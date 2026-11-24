@@ -43,11 +43,13 @@ describe('AnthropicProvider', () => {
 
     it('hands the abort signal to the request, so a stuck call can be given up on', async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ content: [{ type: 'text', text: '回覆' }] }) })
-      const signal = AbortSignal.timeout(10_000)
+      const caller = new AbortController()
 
-      await provider.chatCompletion([{ role: 'user', content: '你好' }], { signal })
+      await provider.chatCompletion([{ role: 'user', content: '你好' }], { signal: caller.signal })
+      const requestSignal = mockFetch.mock.calls[0][1].signal
+      caller.abort()
 
-      expect(mockFetch.mock.calls[0][1].signal).toBe(signal)
+      expect(requestSignal.aborted).toBe(true)
     })
 
     it('merges consecutive same-role messages', async () => {
