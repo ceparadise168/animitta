@@ -90,7 +90,9 @@ export class AnthropicProvider extends LlmProvider {
       if (signal?.aborted) break
     }
     const rateLimited = failure.status === 429 && failure.code !== SPEND_CAP
-    if (!this.#backup || signal?.aborted || rateLimited) throw failure
+    // A limit Eric set himself in the Console is his to lift, not to route around.
+    const ownLimit = failure.code === 'specified_limit_reached'
+    if (!this.#backup || signal?.aborted || rateLimited || ownLimit) throw failure
     try {
       const data = await this.#backup.send(op, body, signal)
       // Counted by an alarm: people still get answers, but Anthropic is down.

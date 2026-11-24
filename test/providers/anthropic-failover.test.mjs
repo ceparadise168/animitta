@@ -111,6 +111,18 @@ describe('AnthropicProvider when Anthropic fails', () => {
     expect(err.message).toBe('Anthropic chat failed: 400 specified_limit_reached')
   })
 
+  it('keeps to the limit Eric set himself: the apology, not the backup', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: { type: 'invalid_request_error', message: 'You have reached your specified API usage limits.' } }),
+    })
+    const provider = new AnthropicProvider({ backup, retryPauseMs: 0 })
+
+    await expect(provider.chatCompletion(ask)).rejects.toThrow('Anthropic chat failed: 400 specified_limit_reached')
+    expect(backup.send).not.toHaveBeenCalled()
+  })
+
   it('keeps the apology for a ramp limit, which passes within seconds', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
