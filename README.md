@@ -89,7 +89,7 @@ See `.env.example` for all available configuration options.
 Key variables:
 - `LLM_PROVIDER`: `openai` or `anthropic`
 - `CHAT_MODEL_OPENAI`: Model for conversation (e.g., `gpt-4.1-mini`)
-- `BEDROCK_MODEL_ID`: The backup for Anthropic (default: `jp.anthropic.claude-haiku-4-5-20251001-v1:0`; empty turns it off). It must be a `jp.` profile of the same model as `CHAT_MODEL_ANTHROPIC`, or synth fails, because 關於 tells users it is the same model, run in Japan. Before it can answer, someone with admin rights submits Anthropic's first-time-use form in the Bedrock console and sends one message in the playground, which also subscribes the account through AWS Marketplace; then the self-test shows `"bedrock":"ok"`
+- `BEDROCK_MODEL_ID`: The backup for Anthropic, off unless set (for example `jp.anthropic.claude-haiku-4-5-20251001-v1:0`). A limit Eric set himself in the Console never goes to the backup. It must be a `jp.` profile of the same model as `CHAT_MODEL_ANTHROPIC`, or synth fails, because 關於 tells users it is the same model, run in Japan. Before it can answer, someone with admin rights submits Anthropic's first-time-use form in the Bedrock console and sends one message in the playground, which also subscribes the account through AWS Marketplace; then the self-test shows `"bedrock":"ok"`
 - `MAX_RECENT_TURNS`: Number of recent conversation turns to keep (default: 5)
 - `CONVERSATION_TTL_DAYS`: Days without a message after which everything remembered is deleted (default: 30). 關於 quotes it to users, and the function's log group uses it too
 - `VOICE_MINUTES_PER_MONTH`: Voice minutes each user may send a month (default: 30). 關於 quotes it to users

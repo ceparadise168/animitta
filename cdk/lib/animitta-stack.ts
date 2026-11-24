@@ -17,9 +17,11 @@ const KEY_REMINDER_DAYS_BEFORE = [7, 1]
 // Everyone's voice minutes together each month, so a crowd cannot run up the
 // Transcribe bill (about US$0.006 a minute). voice.mjs enforces it.
 const VOICE_MINUTES_ALL_USERS = process.env.VOICE_MINUTES_ALL_USERS_PER_MONTH || '1500'
-// The same Claude model on Amazon Bedrock, run only in Japan's regions (Tokyo,
-// Osaka), answers when the Anthropic account cannot. Empty turns the backup off.
-const BEDROCK_MODEL_ID = process.env.BEDROCK_MODEL_ID ?? 'jp.anthropic.claude-haiku-4-5-20251001-v1:0'
+// A backup for when the Anthropic account cannot answer: the same Claude model
+// on Amazon Bedrock, run only in Japan's regions (Tokyo, Osaka). Off until set,
+// as jp.anthropic.claude-haiku-4-5-20251001-v1:0, after the account has
+// accepted Anthropic's first-time-use form; 關於 mentions it only while set.
+const BEDROCK_MODEL_ID = process.env.BEDROCK_MODEL_ID || ''
 const BEDROCK_MODEL_REGIONS = ['ap-northeast-1', 'ap-northeast-3']
 const CHAT_MODEL_ANTHROPIC = process.env.CHAT_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
 // 關於 tells people the backup runs the same model, so it has to be true.
