@@ -47,7 +47,8 @@ function withUnanswered(err, userText) {
     typeof err === 'object' && err !== null && Object.isExtensible(err)
       ? err
       : new Error(String(err?.message ?? err), { cause: err })
-  carrier.unanswered = userText
+  // Not enumerable, so logging the error never prints what the person said.
+  Object.defineProperty(carrier, 'unanswered', { value: userText, configurable: true })
   return carrier
 }
 

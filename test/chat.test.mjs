@@ -1,4 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals'
+import { format } from 'node:util'
 
 const mockGetContext = jest.fn()
 const mockSaveTurn = jest.fn()
@@ -129,6 +130,20 @@ describe('chat service', () => {
         unanswered: '我真的不想活了',
         cause: thrown,
       })
+    })
+
+    it.each([
+      ['an error', new Error('Anthropic chat failed: 529'), 'Anthropic chat failed: 529'],
+      ['a frozen error', Object.freeze(new Error('frozen')), 'frozen'],
+      ['a thrown string', 'boom', 'boom'],
+    ])('keeps what the person said out of the error log after %s', async (_, thrown, failure) => {
+      mockProvider.chatCompletion.mockRejectedValue(thrown)
+
+      const err = await handleText('user1', 'token1', '我真的不想活了', Date.now()).catch((e) => e)
+      const logLine = format('Handler error:', err)
+
+      expect(logLine).toContain(failure)
+      expect(logLine).not.toContain('我真的不想活了')
     })
   })
 
