@@ -6,8 +6,10 @@ import { CRISIS_FALLBACK_REPLY, talksOfEndingLife } from './crisis.mjs'
 import { selfTest } from './self-test.mjs'
 
 const WELCOME_MESSAGE =
-  '嗨～ 這裡是無相界！\n' +
-  '不求籤、不說教，也不必先懂佛學。單純聊聊日常大小事、整理一下思緒，或是好奇看看《金剛經》在說什麼都歡迎！文字或語音都行得通，希望《金剛經》的智慧能帶給你一點不一樣的想法～'
+  '嗨～ 這裡是無相界！\n\n' +
+  '不求籤、不說教，也不必先懂佛學。\n' +
+  '單純聊聊日常大小事、整理一下思緒，或是好奇看看《金剛經》在說什麼都歡迎！\n\n' +
+  '文字或語音都行得通，希望《金剛經》的智慧能帶給你一點不一樣的想法～'
 
 const FALLBACK_REPLY = '我這邊暫時卡住了，沒辦法好好回你。過一下再傳一次給我好嗎'
 const TEXT_ONLY_REPLY = '這個我還看不懂，可以打字或傳語音跟我說嗎'
