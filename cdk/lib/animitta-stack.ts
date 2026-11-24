@@ -17,6 +17,21 @@ const KEY_REMINDER_DAYS_BEFORE = [7, 1]
 // Everyone's voice minutes together each month, so a crowd cannot run up the
 // Transcribe bill (about US$0.006 a minute). voice.mjs enforces it.
 const VOICE_MINUTES_ALL_USERS = process.env.VOICE_MINUTES_ALL_USERS_PER_MONTH || '1500'
+const CONVERSATION_TTL_DAYS = Number(process.env.CONVERSATION_TTL_DAYS || '30')
+if (!Number.isInteger(CONVERSATION_TTL_DAYS) || CONVERSATION_TTL_DAYS < 1) {
+  throw new Error(`CONVERSATION_TTL_DAYS must be a whole number of days, got ${process.env.CONVERSATION_TTL_DAYS}`)
+}
+
+// CloudWatch keeps logs only for a fixed set of day counts: the longest that
+// still ends within the given days.
+function logRetentionWithin(days: number): logs.RetentionDays {
+  const offered = Object.values(logs.RetentionDays).filter(
+    (d): d is logs.RetentionDays => typeof d === 'number' && d !== logs.RetentionDays.INFINITE
+  )
+  const within = offered.filter((d) => d <= days)
+  if (within.length === 0) throw new Error(`No CloudWatch log retention ends within ${days} days`)
+  return Math.max(...within)
+}
 
 export class AnimittaStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -64,7 +79,7 @@ export class AnimittaStack extends cdk.Stack {
         LINE_CHANNEL_SECRET: process.env.LINE_CHANNEL_SECRET || '',
         MEMORY_TABLE_NAME: table.tableName,
         MAX_RECENT_TURNS: process.env.MAX_RECENT_TURNS || '5',
-        CONVERSATION_TTL_DAYS: process.env.CONVERSATION_TTL_DAYS || '90',
+        CONVERSATION_TTL_DAYS: String(CONVERSATION_TTL_DAYS),
         SESSION_IDLE_HOURS: process.env.SESSION_IDLE_HOURS || '2',
         RICH_MENU_ID: process.env.RICH_MENU_ID || '',
         VOICE_BUCKET_NAME: voiceBucket.bucketName,
@@ -89,6 +104,11 @@ export class AnimittaStack extends cdk.Stack {
         resources: [`arn:aws:transcribe:${this.region}:${this.account}:transcription-job/animitta-*`],
       })
     )
+
+    new logs.LogRetention(this, 'HandlerLogRetention', {
+      logGroupName: `/aws/lambda/${fn.functionName}`,
+      retention: logRetentionWithin(CONVERSATION_TTL_DAYS),
+    })
 
     const fnUrl = fn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,

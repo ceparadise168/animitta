@@ -17,7 +17,7 @@ const SESSION_IDLE_HOURS = parseFloat(process.env.SESSION_IDLE_HOURS || '2')
 // their last message: each turn expires this long after it was said, and the
 // summary this long after the latest exchange. One number, so the promise the
 // 關於 message quotes to users cannot drift between the two.
-export const RETENTION_DAYS = parseInt(process.env.CONVERSATION_TTL_DAYS || '90', 10)
+export const RETENTION_DAYS = parseInt(process.env.CONVERSATION_TTL_DAYS || '30', 10)
 
 const nowSeconds = () => Math.floor(Date.now() / 1000)
 const expiresAfter = (days) => ({ N: String(nowSeconds() + days * 86400) })

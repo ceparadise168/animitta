@@ -25,8 +25,7 @@ const MAX_SECONDS_PER_MESSAGE = 180
 // be done 40 seconds after the user sent the message, which leaves the model
 // time to answer before the token goes.
 const TRANSCRIBE_BUDGET_MS = 40_000
-// A month's counter outlives the month, and goes before the 90 days the 關於
-// message promises everything about a quiet user is gone.
+// A month's counter outlives the month.
 const COUNTER_DAYS = 40
 
 const REMEMBERED_AS = '（傳了一段語音）'
