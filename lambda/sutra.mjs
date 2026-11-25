@@ -183,10 +183,10 @@ const ONLY_ASKS_WHAT_IT_MEANS =
 const SOMEONE_ELSES_LINE =
   /(他|她|老闆|主管|同事|朋友|我媽|我爸|媽媽|爸爸|老師|男友|女友|男朋友|女朋友|老公|老婆|家人|別人|對方)(說的|講的|的)?(這句|那句|這段|那段)/
 
-function referredBack(text, lastReply) {
-  if (!lastReply || SOMEONE_ELSES_LINE.test(text)) return []
+function referredBack(text, lastExchange) {
+  if (!lastExchange || SOMEONE_ELSES_LINE.test(text)) return []
   if (!(POINTS_AT_THE_LINE.test(text) || ONLY_ASKS_WHAT_IT_MEANS.test(text.trim()))) return []
-  return [...lastReply.matchAll(/「([^」]+)」/g)]
+  return [...lastExchange.matchAll(/「([^」]+)」/g)]
     .map(([, quote]) => han(quote))
     .filter((words) => words.length >= 6)
     .flatMap((words) => CHAPTERS.filter((_, i) => CHAPTER_HAN[i].includes(words)).slice(0, 1))
@@ -201,9 +201,11 @@ function referredBack(text, lastReply) {
  * 應無所住 too) invites "this line appears twice".
  */
 export function passagesFor(userText, recentTurns = []) {
-  const last = recentTurns.at(-1)
-  const lastReply = last?.role === 'assistant' ? last.content : ''
-  const pointed = [...quotedIn(userText), ...byChapterName(userText), ...referredBack(userText, lastReply)]
+  // The last exchange, both sides: a note sent alone seldom quotes its line,
+  // and what the person pressed to get it does.
+  const [asked, said] = [recentTurns.at(-2), recentTurns.at(-1)]
+  const lastExchange = said?.role === 'assistant' ? `${asked?.role === 'user' ? asked.content : ''}\n${said.content}` : ''
+  const pointed = [...quotedIn(userText), ...byChapterName(userText), ...referredBack(userText, lastExchange)]
   const seen = new Set()
   return (pointed.length ? pointed : byTopic(userText))
     .filter(({ chapter }) => !seen.has(chapter.title) && seen.add(chapter.title))
@@ -228,8 +230,12 @@ export function passagesFor(userText, recentTurns = []) {
 //
 // A note says who is speaking, what the line answers, and what it means in
 // plain words. It does not address the reader or say what they should do, and
-// stays within 160 characters. Each reading rests on the chapter itself and on
-// 六祖惠能《金剛經解義》 and 印順《般若經講記》 (CBETA X0459, Y0001).
+// stays within 160 characters, spaces and line breaks not counted. Each reading
+// rests on the chapter itself and on 六祖惠能《金剛經解義》 and 印順《般若經講記》
+// (CBETA X0459, Y0001).
+//
+// A button under a line carries the line's place in this list, so a line added
+// or moved changes what a button already on someone's screen points at.
 export const DAILY_LINES = JSON.parse(readFileSync(new URL('./daily-lines.json', import.meta.url), 'utf8')).map(
   ({ line, chapter, note }) => [line, chapter, note],
 )

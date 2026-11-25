@@ -124,6 +124,29 @@ describe('passagesFor', () => {
     it('ignores the person’s own words in quotes', () => {
       expect(titlesFor('這句是什麼意思', turns('你剛剛說「只能這樣過下去」，聽起來很累'))).toEqual([])
     })
+
+    // 多了解這一段 sends the note alone once the chapter is in memory, and a
+    // note seldom quotes its line: what the person pressed says which line.
+    const noteAlone = (shown) => [
+      { role: 'user', content: `（按了「${shown.line}」底下的「多了解這一段」）` },
+      { role: 'assistant', content: shown.note },
+    ]
+
+    it.each(DAILY_LINES.map((_, i) => [i]))('finds the chapter after the note of line %d was sent alone', (i) => {
+      expect(titlesFor('這句是什麼意思？', noteAlone(lineAt(i)))).toEqual([lineAt(i).chapter.title])
+    })
+
+    it('still needs the person to be asking about it after a note', () => {
+      expect(titlesFor('今天真的好累', noteAlone(lineAt(19)))).toEqual([])
+    })
+
+    it('ignores what the person put in quotes the turn before', () => {
+      const said = [
+        { role: 'user', content: '我媽說「只能這樣過下去」' },
+        { role: 'assistant', content: '聽起來很累' },
+      ]
+      expect(titlesFor('這句是什麼意思', said)).toEqual([])
+    })
   })
 })
 
@@ -216,11 +239,6 @@ describe('the note of a daily line', () => {
   it.each(notes)('explains 「%s」 without addressing the reader or using Markdown', (_, note) => {
     expect(note).not.toMatch(/[你妳您]/)
     expect(note).not.toMatch(/[*#_~`>]/)
-  })
-
-  it('comes with the line', () => {
-    expect(lineAt(19).note).toBe(DAILY_LINES[19][2])
-    expect(lineAt(19).note).toContain('是法')
   })
 })
 

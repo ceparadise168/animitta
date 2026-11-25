@@ -215,6 +215,15 @@ describe('conversation memory, end to end', () => {
       expect(chatRequests).toEqual([])
     })
 
+    it('looks up the chapter for a question typed after a note that was sent alone', async () => {
+      await press('action=daily_line_more&line=19')
+      await press('action=daily_line_next&line=19')
+      await press('action=daily_line_more&line=20')
+      await sendText('這句是什麼意思？')
+
+      expect(chatRequests[0].system).toContain('那句出自〈淨心行善分第二十三〉')
+    })
+
     it('answers a question typed after a note with the note and its chapter at hand', async () => {
       await press('action=daily_line_more&line=19')
       await sendText('這句是什麼意思？')
