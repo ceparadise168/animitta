@@ -182,6 +182,7 @@ function bodyOf(alarm, causes, onBackup, claude) {
   else if (claude?.skipped) lines.push(`Claude 這次沒叫：${claude.skipped}。`)
   else if (claude?.failed) lines.push(`叫 Claude 失敗（${claude.failed}）。如果是 401，排程任務的 token 可能失效了，要你重產一把。`)
   else if (onBackup) lines.push('備援接手的警報不叫 Claude：使用者照常收到回覆。')
+  else if (!causes.length) lines.push('沒有叫 Claude：找不到錯誤行，看不出原因。')
   else lines.push('沒有叫 Claude：這類原因改程式修不好。')
   return lines.join('\n')
 }

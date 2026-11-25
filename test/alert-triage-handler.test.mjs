@@ -146,6 +146,17 @@ describe('alert triage', () => {
     expect(emails()[0].Message).toContain('找不到對應的錯誤行')
   })
 
+  it('ends with why Claude was not woken: no lines to read, or a cause code cannot fix', async () => {
+    const lastLine = async (lines) => {
+      const { handler, emails } = setUp({ lines })
+      await handler(alarm('animitta-handler-failures'))
+      return emails()[0].Message.split('\n').at(-1)
+    }
+
+    expect(await lastLine([])).toBe('沒有叫 Claude：找不到錯誤行，看不出原因。')
+    expect(await lastLine([keyError])).toBe('沒有叫 Claude：這類原因改程式修不好。')
+  })
+
   it.each([
     ['transcription', 'Handler error: Error: Transcription failed: media'],
     ['an unusual Anthropic status', 'Handler error: Error: Anthropic chat failed: 404 not_found_error'],
