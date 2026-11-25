@@ -172,4 +172,56 @@ describe('AnthropicProvider', () => {
     })
   })
 
+  describe('summarize', () => {
+    const turns = [
+      { role: 'user', content: '今天又加班到快十點' },
+      { role: 'assistant', content: '辛苦了，先好好休息' },
+    ]
+
+    async function sentRequest(existingSummary) {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ content: [{ type: 'text', text: '摘要' }] }) })
+      await provider.summarize(existingSummary, turns)
+      return JSON.parse(mockFetch.mock.calls[0][1].body)
+    }
+    const promptOf = (request) => request.messages[0].content
+    const between = (text, open, close) => text.slice(text.indexOf(open) + open.length, text.indexOf(close))
+
+    it('puts the turns inside the transcript tags, labelled by speaker', async () => {
+      const prompt = promptOf(await sentRequest('舊的摘要'))
+
+      expect(between(prompt, '<要濃縮的對話>\n', '\n</要濃縮的對話>')).toBe('[使用者] 今天又加班到快十點\n[無相界] 辛苦了，先好好休息')
+      expect(prompt).not.toMatch(/^(User|Assistant):/m)
+    })
+
+    it('puts the old summary inside its own tags', async () => {
+      const prompt = promptOf(await sentRequest('使用者是一名軟體工程師'))
+
+      expect(between(prompt, '<舊摘要>\n', '\n</舊摘要>')).toBe('使用者是一名軟體工程師')
+    })
+
+    it('leaves the old summary out when there is none', async () => {
+      const prompt = promptOf(await sentRequest(null))
+
+      expect(prompt).not.toContain('舊摘要')
+    })
+
+    it('asks for the summary alone after the transcript, so the model does not reply', async () => {
+      const prompt = promptOf(await sentRequest('舊的摘要'))
+      const closing = '請只輸出新的摘要本身。你不是對話裡的任何一方，不要回覆任何人，也不要接著寫對話。'
+
+      expect(prompt.indexOf(closing)).toBeGreaterThan(prompt.indexOf('</要濃縮的對話>'))
+      expect(prompt.endsWith(closing)).toBe(true)
+    })
+
+    it('keeps the summary request shape', async () => {
+      const request = await sentRequest('舊的摘要')
+
+      expect(request).toEqual({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        temperature: 0.3,
+        messages: [{ role: 'user', content: expect.any(String) }],
+      })
+    })
+  })
 })
