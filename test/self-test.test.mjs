@@ -25,9 +25,10 @@ describe('selfTest', () => {
   })
 
   it('asks the model for worries too when there is one, and reports it on a line of its own', async () => {
-    const both = { answersWorries: true, chatCompletion: jest.fn().mockResolvedValue({ text: '好' }) }
+    const both = { answersWorries: true, ask: jest.fn().mockResolvedValue('A'), chatCompletion: jest.fn().mockResolvedValue({ text: '好' }) }
     const wrongName = {
       answersWorries: true,
+      ask: jest.fn().mockResolvedValue('A'),
       chatCompletion: jest.fn(async (_, { worries } = {}) => {
         if (worries) throw new Error('Anthropic chat failed: 404 not_found_error')
         return { text: '好' }
@@ -39,6 +40,19 @@ describe('selfTest', () => {
     expect(await results({ anthropic: wrongName, backup: null, secret: 'line-secret' })).toMatchObject({
       anthropic: 'ok',
       worries: 'Anthropic chat failed: 404 not_found_error',
+    })
+  })
+
+  it('does not call worries answered when the talk cannot be sorted, since they would never reach their model', async () => {
+    const cannotSort = {
+      answersWorries: true,
+      ask: jest.fn().mockRejectedValue(new Error('Anthropic ask failed: 400 invalid_request_error')),
+      chatCompletion: jest.fn().mockResolvedValue({ text: '好' }),
+    }
+
+    expect(await results({ anthropic: cannotSort, backup: null, secret: 'line-secret' })).toMatchObject({
+      anthropic: 'ok',
+      worries: 'Anthropic ask failed: 400 invalid_request_error',
     })
   })
 

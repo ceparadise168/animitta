@@ -32,9 +32,10 @@ const oneLine = ({ role, content }) => `${role === 'user' ? '使用者' : '無�
 async function kindOfTalk(provider, recentTurns, userText, signal) {
   const question =
     '你在替一個聊天機器人分派訊息。看最近的對話和最新一則訊息，判斷這段對話現在屬於哪一類，只回答一個字母。\n' +
-    'A：輕鬆閒聊、打招呼、玩笑、隨口的抱怨（好想翹班、熱死了）、問機器人自己的事\n' +
+    'A：輕鬆閒聊。打招呼、玩笑、分享日常小事或好心情、隨口的抱怨（好想翹班、熱死了、襪子又少一隻）、問機器人自己的事\n' +
     'B：問金剛經、佛法、經文的意思。前面在問經文、現在接著追問那句話的，也算這一類\n' +
-    'C：心事。煩惱、低落、卡住、關係或工作上的困擾，或是在問這類事情該怎麼辦\n\n' +
+    'C：心事。煩惱、低落、卡住、關係或工作上的困擾，或是在問這類事情該怎麼辦。' +
+    '話裡帶著不想活、想消失、不想醒來、撐不下去的意思，或像在道別、交代事情的，就算說得像玩笑，也一律算這一類\n\n' +
     `最近的對話：\n${recentTurns.slice(-6).map(oneLine).join('\n') || '（還沒有）'}\n\n最新一則：${userText}`
   try {
     const letter = (await provider.ask(question, { signal: within(signal, ASK_WITHIN_MS) })).trim()[0]
@@ -61,11 +62,13 @@ async function write(provider, context, userText, { worries, signal, deadline })
 }
 
 // When the model for worries cannot answer (down, refusing, or still writing
-// with this little time left), the chat model does. The model for worries is
-// asked only with time to write: at high effort Sonnet 5.5 took up to 8
-// seconds over 52 replies (2026-11-26).
+// when its time is up), the chat model does. The model for worries is asked
+// only with time to write: at high effort Sonnet 5.5 took up to 8 seconds
+// over 52 replies (2026-11-26). It gets 20 seconds at most, so that on a slow
+// day the chat model still has most of the time it has without a second model.
 const LEFT_FOR_THE_CHAT_MODEL_MS = 8_000
 const MODEL_FOR_WORRIES_NEEDS_MS = 10_000
+const MODEL_FOR_WORRIES_AT_MOST_MS = 20_000
 
 // Sorting comes first and may take ASK_WITHIN_MS. With less time than all
 // three need, the talk is not sorted and the chat model answers: a message
@@ -74,7 +77,7 @@ const MODEL_FOR_WORRIES_NEEDS_MS = 10_000
 const timeToThinkFirst = (deadline) => deadline - Date.now() >= ASK_WITHIN_MS + MODEL_FOR_WORRIES_NEEDS_MS + LEFT_FOR_THE_CHAT_MODEL_MS
 
 async function answer(provider, context, userText, { worries, signal, deadline }) {
-  const room = deadline - Date.now() - LEFT_FOR_THE_CHAT_MODEL_MS
+  const room = Math.min(deadline - Date.now() - LEFT_FOR_THE_CHAT_MODEL_MS, MODEL_FOR_WORRIES_AT_MOST_MS)
   if (worries && room >= MODEL_FOR_WORRIES_NEEDS_MS) {
     try {
       return await write(provider, context, userText, { worries, signal: within(signal, room), deadline: Date.now() + room })
@@ -100,45 +103,72 @@ async function answer(provider, context, userText, { worries, signal, deadline }
 // A question after someone's safety is often a choice too (是想好好睡一場，
 // 還是有不想再醒的念頭), and it is the one question that must go out: lines
 // that could go either way are left to the model, which asks (crisis.mjs).
-// Nothing here tells that question from the rest. Lists of words missed 3 of
-// 10 written to try them, and the chat model took 8 of 10 for a choice even
-// when told they are none (2026-11-26). So the closing choice is taken off
-// only talk known to be light, where that question is not asked: talk about
-// worries, and talk that was not sorted, goes out as written. In light talk
-// the lists below are still checked first. Leaving a choice in costs little;
-// taking that question out does not.
+// Nothing here tells that question from the rest for certain. The lists of
+// words below let 6 of 59 such questions written by a reviewer through, and
+// the chat model took 8 of 10 for a choice even when told they are none
+// (2026-11-26).
+// So the closing choice is taken off only talk sorted as light, and talk
+// about worries, like talk that was not sorted, goes out as written. The
+// sorting is told that a line with not wanting to live in it is no small
+// talk however lightly said; of 74 such lines it took one for small talk
+// (我買了木炭, alone). In light talk the lists below are still checked
+// first. Leaving a choice in costs little; taking that question out does not.
 const ASKS_AFTER_THEIR_SAFETY =
-  /念頭|想不開|醒|死|活著|活下去|想活|傷害|自傷|消失|不見|不在了|這一切|這個世界|離開大家|撐|危險|安全|平安|一個人|身邊有人|有人陪|有人在|認真|說真的|玩笑|氣話|結束|解脫|了結|了斷|放棄自己|放棄一切|傻事|極端/
+  /念頭|想不開|醒|死|活著|活下去|想活|傷害|自傷|消失|不見|不在了|這一切|這個世界|離開大家|撐|危險|安全|平安|一個人|身邊有人|有人陪|有人在|有地方|今晚|現在人在|認真|說真的|真的這樣想|脫口而出|玩笑|氣話|結束|解脫|了結|了斷|放棄自己|放棄一切|傻事|極端|打算|方法|計畫|藥|刀|炭/
 const NEAR_A_CRISIS =
-  /想死|不想活|活不下去|活下去|活著|撐不下去|撐不住|撐不了|不想撐|自殺|輕生|自殘|傷害自己|結束|消失|不在了|一睡不醒|不想醒|不要醒|醒不來|想走了|想不開|生無可戀|沒意義|沒有意義|解脫|放棄自己|放棄一切|放棄人生|1925|1995|1980|119|113|專線|認真/
+  /想去?死|想要死|不想活|不要活|不活了|活膩|活不下去|活下去|活著|撐不下去|撐不住|撐不了|不想撐|自殺|輕生|自殘|傷害自己|結束|消失|不在了|一睡不醒|不想醒|不要醒|醒不來|想走了|先走了|想不開|生無可戀|沒意義|沒有意義|解脫|放棄自己|放棄一切|放棄人生|負擔|累贅|保重|遺書|遺言|後事|木炭|燒炭|安眠藥|農藥|吞藥|[存囤].{0,6}藥|頂樓|擔心你|放心不下|1925|1995|1980|119|113|專線|認真/
+const nearACrisis = (text) => NEAR_A_CRISIS.test(text) || talksOfEndingLife(text)
+
+// What the person said lately, and what the bot still remembers of them: a
+// crisis three hours ago is in the session before, or in the summary.
+const heardLately = ({ summary, recentTurns, previousSession }, userText) => [
+  userText,
+  summary ?? '',
+  ...[...(previousSession?.turns ?? []), ...recentTurns].filter(({ role }) => role === 'user').slice(-6).map(({ content }) => content),
+]
+
 const OPEN_QUESTION = /什麼|怎麼|怎樣|多久|哪|誰|為什麼|如何/
-// 我想問你一件事： with its question gone would be left hanging.
-const LEADS_IN = /[：:，,、—]$|問(你|妳)?(一件事|一下|個問題)?$/
 const LEAST_LEFT_TO_SEND = 4
 const SENTENCE = /[^。！？!?\n]+[。！？!?～~]*\s*/g
 const hasWords = ({ 0: sentence }) => /[一-鿿A-Za-z]/.test(sentence)
 const hanCount = (text) => (text.match(/[一-鿿]/g) ?? []).length
-const nearACrisis = (text) => NEAR_A_CRISIS.test(text) || talksOfEndingLife(text)
+const PAIRS = ['（）', '()', '「」', '『』']
 
-// For a reply in light talk.
-async function withoutClosingChoice(provider, reply, userText, recentTurns, signal) {
+// With its closing sentence gone, the rest has to be a reply by itself: more
+// than a word, no lead-in left hanging (我想問你一件事。), no bracket or quote
+// left open.
+function standsAlone(rest) {
+  if (hanCount(rest) < LEAST_LEFT_TO_SEND || /[：:，,、—–…⋯]$/.test(rest)) return false
+  const lastSentence = rest.split(/[。！？!?\n]+/).filter((part) => part.trim()).at(-1) ?? ''
+  if (/問|確認|好奇|請教/.test(lastSentence)) return false
+  return PAIRS.every(([open, close]) => rest.split(open).length === rest.split(close).length)
+}
+
+// For a reply in light talk. Whatever shape is not plainly a closing choice
+// after a finished thought stays as written.
+async function withoutClosingChoice(provider, reply, userText, context, signal) {
   if (!provider.answersQuestions) return reply
   const sentences = [...reply.matchAll(SENTENCE)]
+  const sentence = (i) => sentences[i]?.[0].trim() ?? ''
   const last = sentences.findLastIndex(hasWords)
-  if (last < 0 || !sentences[last][0].includes('還是')) return reply
+  if (last < 0 || !sentence(last).includes('還是')) return reply
 
   // 是今天特別悶？還是最近發生了什麼事？ is one choice in two questions. After
-  // an open question (多久了？還是最近才開始？) only the second half is, and
-  // after a statement (是太久沒休息了。還是兩個都有？) only the question.
-  const before = sentences[last - 1]?.[0].trim() ?? ''
-  const carriesOn = sentences[last][0].trim().startsWith('還是') && /[？?]$/.test(before) && !OPEN_QUESTION.test(before)
-  const from = sentences[carriesOn ? last - 1 : last].index
+  // an open question (多久了？還是最近才開始？) only the second half is. After
+  // anything else (是工作的事。還是家裡的事？) the first half would be left as
+  // half a thought, and so would 是工作？ of 是工作？是家裡？還是感情？
+  let first = last
+  if (sentence(last).startsWith('還是')) {
+    if (!/[？?]$/.test(sentence(last - 1))) return reply
+    if (!OPEN_QUESTION.test(sentence(last - 1))) first = last - 1
+    if (first !== last && /^是/.test(sentence(first - 1)) && /[？?]$/.test(sentence(first - 1))) return reply
+  }
+  const from = sentences[first].index
   const closing = reply.slice(from, sentences[last].index + sentences[last][0].length).trim()
   const rest = reply.slice(0, from).trim()
-  if (hanCount(rest) < LEAST_LEFT_TO_SEND || LEADS_IN.test(rest)) return reply
+  if (!standsAlone(rest)) return reply
 
-  const saidLately = [userText, ...recentTurns.filter(({ role }) => role === 'user').slice(-3).map(({ content }) => content)]
-  if (ASKS_AFTER_THEIR_SAFETY.test(closing) || nearACrisis(reply) || saidLately.some(nearACrisis)) return reply
+  if (ASKS_AFTER_THEIR_SAFETY.test(closing) || nearACrisis(reply) || heardLately(context, userText).some(nearACrisis)) return reply
 
   // Asked this way the chat model took 5 of 92 closing statements for a
   // choice and missed none of 32 real ones; shown what the person said and
@@ -175,13 +205,13 @@ export async function handleText(userId, replyToken, userText, sentAt, { onRepli
     const budget = answerWithin(sentAt)
     const signal = AbortSignal.timeout(budget)
     const deadline = Date.now() + budget
-    // What the caller knows of the talk comes first. Unsorted, it is neither kind.
-    let talk = worries === undefined ? null : worries ? 'worries' : 'light'
-    if (worries === undefined && provider.answersWorries && timeToThinkFirst(deadline)) {
+    // What the caller says of the talk comes first. Unsorted, it is neither kind.
+    let talk = worries === true ? 'worries' : worries === false ? 'light' : null
+    if (talk === null && provider.answersWorries && timeToThinkFirst(deadline)) {
       talk = await kindOfTalk(provider, context.recentTurns, userText, signal)
     }
     const text = stripMarkdown(await answer(provider, context, userText, { worries: talk === 'worries', signal, deadline }))
-    reply = talk === 'light' ? await withoutClosingChoice(provider, text, userText, context.recentTurns, signal) : text
+    reply = talk === 'light' ? await withoutClosingChoice(provider, text, userText, context, signal) : text
     await replyMessage(replyToken, before ? [before, reply] : reply)
   } catch (err) {
     // Whoever apologises instead has to know what went unanswered.

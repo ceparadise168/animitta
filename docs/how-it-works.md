@@ -14,7 +14,7 @@ The [README](../README.md) is the overview, in Traditional Chinese. This page is
 
 ## Which model answers
 
-One model answers everything unless `WORRIES_MODEL_ANTHROPIC` is set. With it set, the chat model first sorts each message (typed, spoken, or a sticker) as small talk, a question about the sutra, or worries, with the last three exchanges in view so that a bare 對啊 stays with what it answers. Worries go to that second model, run at `WORRIES_EFFORT_ANTHROPIC`; small talk and the sutra stay with the chat model. 多了解這一段 is a question about the sutra by construction and is not sorted.
+One model answers everything unless `WORRIES_MODEL_ANTHROPIC` is set. With it set, the chat model first sorts each message (typed, spoken, or a sticker) as small talk, a question about the sutra, or worries, with the last three exchanges in view so that a bare 對啊 stays with what it answers. A line with not wanting to live in it counts as worries however lightly it is said. Worries go to that second model, run at `WORRIES_EFFORT_ANTHROPIC`; small talk and the sutra stay with the chat model. 多了解這一段 is a question about the sutra by construction and is not sorted.
 
 The model for worries reads the same prompt with two additions (`lambda/prompt.mjs`): a paragraph telling it not to hold back too far, and a sentence saying that a sticker with 想死 written on it is said plainly.
 
@@ -22,15 +22,15 @@ The second model is used only when there is time for it, and the chat model answ
 
 - A message that could not be sorted is answered by the chat model.
 - A message is not sorted at all with less than 21 seconds left to answer it (a long voice message, a late webhook): 3 for sorting, 10 for the model for worries to write, 8 kept for the chat model.
-- When the model for worries fails, refuses, or is still writing with 8 seconds left, the chat model answers instead (logged as `The model for worries did not answer`). No alarm is raised for this. A deploy's self-test asks that model too and does not pass when it fails, so a wrong name is found at deploy time.
+- The model for worries gets 20 seconds at most. When it fails, refuses, or is still writing when that time is up, the chat model answers instead (logged as `The model for worries did not answer`). No alarm is raised for this. A deploy's self-test sorts once and asks that model too, and does not pass when either fails, so a wrong name is found at deploy time.
 - The backup on Amazon Bedrock is the chat model only, so it never stands in for the other one.
 
 Before a reply goes out:
 
 - A reply carrying the model's notes to itself (`<reasoning>`, `<invoke …>`) is asked for once more; a second one becomes the apology.
-- In light talk, a closing question that makes the person pick one of two readings (是他們變了，還是你變了) is left off. Whether the closing sentence is one is asked of the chat model, since 還是 also means "still" and "had better".
+- In talk sorted as light, a closing question that makes the person pick one of two readings (是他們變了，還是你變了) is left off. Whether the closing sentence is one is asked of the chat model, since 還是 also means "still" and "had better".
 
-Light talk is talk sorted as small talk or the sutra, and 多了解這一段. Talk about worries, and talk that was not sorted (no model for worries, no time, the sorting failed), goes out as written, whichever model wrote it. The reason is one question: after a line that could go either way (好想一睡不醒), the model asks 是想好好睡一場，還是有不想再醒的念頭, which is a choice in form and the one question that must go out. Neither a list of words nor the chat model, asked, could tell it from the rest, so the closing choice is taken off only where that question is not asked. In light talk the reply still stays as written when the closing sentence has a word about safety in it, when the reply or the person's last few messages hold a crisis word or pass the check in `lambda/crisis.mjs`, and when taking the sentence out would leave almost nothing or a lead-in with nothing after it.
+Light talk is talk the sorting called small talk or the sutra, and 多了解這一段. Talk about worries, and talk that was not sorted (no model for worries, no time, the sorting failed), goes out as written, whichever model wrote it. The reason is one question: after a line that could go either way (好想一睡不醒), the model asks 是想好好睡一場，還是有不想再醒的念頭, which is a choice in form and the one question that must go out. Neither a list of words nor the chat model, asked, could tell it from the rest for certain, so this rests first on the sorting, which is a model's answer and can be wrong. Behind it, in light talk the reply still stays as written when the closing sentence has a word about safety in it, and when the reply, the person's last few messages, the session before or the summary hold a crisis word or pass the check in `lambda/crisis.mjs`. It also stays whenever the rest would not be a reply by itself: almost nothing left, a lead-in with nothing after it, half a choice, a bracket left open.
 
 Turning the model for worries off (unsetting `WORRIES_MODEL_ANTHROPIC`) therefore also leaves every typed message's reply as written.
 

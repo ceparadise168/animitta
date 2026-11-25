@@ -20,10 +20,15 @@ export async function selfTest({
 } = {}) {
   const results = {
     anthropic: await outcome(() => anthropic.chatCompletion(AS_REAL_MESSAGES_ARE, { signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })),
-    // A wrong name for it would turn every worry into the chat model's answer,
-    // unnoticed, so a deploy does not pass with it failing.
+    // Worries reach their model when the talk can be sorted, which is a short
+    // question, and when that model answers. Either one failing would turn
+    // every worry into the chat model's answer, unnoticed, so a deploy does
+    // not pass with it.
     worries: anthropic.answersWorries
-      ? await outcome(() => anthropic.chatCompletion(AS_REAL_MESSAGES_ARE, { worries: true, signal: AbortSignal.timeout(ANSWER_WITHIN_MS) }))
+      ? await outcome(async () => {
+          await anthropic.ask('請只回一個字母：A', { signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })
+          await anthropic.chatCompletion(AS_REAL_MESSAGES_ARE, { worries: true, signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })
+        })
       : 'off',
     bedrock: backup
       ? await outcome(() => backup.send('chat', { max_tokens: 16, messages: QUESTION }, AbortSignal.timeout(ANSWER_WITHIN_MS)))
