@@ -23,6 +23,11 @@ export class LlmProvider {
     throw new Error('ask not implemented')
   }
 
+  /** Whether ask() is answered, so callers do not put a question to a provider that has none. */
+  get answersQuestions() {
+    return false
+  }
+
   /** Whether worries go to a model of their own (chatCompletion's worries option). */
   get answersWorries() {
     return false

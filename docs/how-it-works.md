@@ -14,16 +14,23 @@ The [README](../README.md) is the overview, in Traditional Chinese. This page is
 
 ## Which model answers
 
-One model answers everything unless `WORRIES_MODEL_ANTHROPIC` is set. With it set, the chat model first sorts each typed message (voice and stickers too) as small talk, a question about the sutra, or worries, with the last three exchanges in view so that a bare 對啊 stays with what it answers. Worries go to that second model, run at `WORRIES_EFFORT_ANTHROPIC`; small talk and the sutra stay with the chat model. Sorting takes about half a second. 多了解這一段 is a question about the sutra by construction and is not sorted.
+One model answers everything unless `WORRIES_MODEL_ANTHROPIC` is set. With it set, the chat model first sorts each message (typed, spoken, or a sticker) as small talk, a question about the sutra, or worries, with the last three exchanges in view so that a bare 對啊 stays with what it answers. Worries go to that second model, run at `WORRIES_EFFORT_ANTHROPIC`; small talk and the sutra stay with the chat model. 多了解這一段 is a question about the sutra by construction and is not sorted.
 
-The model for worries reads the same prompt with two additions (`lambda/prompt.mjs`): a paragraph telling it not to hold back too far, since the prompt's many "don't"s were written for a model that pushes, and a sentence saying that a sticker with 想死 written on it is said plainly.
+The model for worries reads the same prompt with two additions (`lambda/prompt.mjs`): a paragraph telling it not to hold back too far, and a sentence saying that a sticker with 想死 written on it is said plainly.
 
-Nothing here can cost a person their reply. A message that could not be sorted is answered by the chat model. When the model for worries fails, refuses, or is still writing with 8 seconds left, the chat model answers instead (logged as `The model for worries did not answer`). The backup on Amazon Bedrock is the chat model only, so it never stands in for the other one.
+The second model is used only when there is time for it, and the chat model answers whenever it cannot:
+
+- A message that could not be sorted is answered by the chat model.
+- A message is not sorted at all with less than 21 seconds left to answer it (a long voice message, a late webhook): 3 for sorting, 10 for the model for worries to write, 8 kept for the chat model.
+- When the model for worries fails, refuses, or is still writing with 8 seconds left, the chat model answers instead (logged as `The model for worries did not answer`). No alarm is raised for this. A deploy's self-test asks that model too and does not pass when it fails, so a wrong name is found at deploy time.
+- The backup on Amazon Bedrock is the chat model only, so it never stands in for the other one.
 
 Before a reply goes out:
 
 - A reply carrying the model's notes to itself (`<reasoning>`, `<invoke …>`) is asked for once more; a second one becomes the apology.
-- A closing question that makes the person pick one of two readings of their own life (是他們變了，還是你變了) is left off. Whether the closing sentence is one is asked of the chat model, since 還是 also means "still" and "had better"; it is asked only when the sentence has 還是 in it, and never when the talk is near a crisis or almost nothing would be left to send.
+- A closing question that makes the person pick one of two readings of their own life (是他們變了，還是你變了) is left off what the chat model wrote. Whether the closing sentence is one is asked of the chat model itself, since 還是 also means "still" and "had better". What the model for worries wrote goes out as written.
+
+That closing question stays when it may be a question after the person's safety (是想好好睡一場，還是有不想再醒的念頭), which is the one question that must go out. It stays when the sentence has a word about safety in it, and when the reply or the person's last few messages hold a crisis word or pass the check in `lambda/crisis.mjs`; the chat model is also told that such a question is no choice. These are lists of words, so a way of saying it that is on none of them rests on the chat model's answer alone. The question also stays when taking it out would leave almost nothing, or a lead-in with nothing after it.
 
 The prompt and its demos are the same for everyone, so they are sent as a block Anthropic may keep for a few minutes and bill at a tenth when read again.
 
@@ -85,7 +92,7 @@ The backup is off unless `BEDROCK_MODEL_ID` is set (for example `jp.anthropic.cl
 aws lambda invoke --function-name animitta --payload '{"selfTest":true}' --cli-binary-format raw-in-base64-out out.json
 ```
 
-It asks Anthropic (the chat model, and the model for worries when there is one) and the backup a one-word question and checks a LINE signature with the real secret, then writes `{"anthropic":"ok","bedrock":"ok","signature":"ok"}` or the failure messages. Only a direct invoke runs it; requests through the webhook URL carry `requestContext` and never do.
+It asks the chat model, the model for worries when there is one, and the backup a one-word question and checks a LINE signature with the real secret, then writes `{"anthropic":"ok","worries":"off","bedrock":"ok","signature":"ok"}` or the failure messages. Only a direct invoke runs it; requests through the webhook URL carry `requestContext` and never do.
 
 ## Alerts
 

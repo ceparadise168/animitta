@@ -30,7 +30,7 @@ export const BOT_FILES = new Set([
 const PROVIDER = /(Anthropic|OpenAI|Bedrock) (chat|summary) failed: (\d{3}|no response|unreadable reply)(?: ([A-Za-z_]{3,60}))?/
 const ABORTED = /aborted due to timeout|\b(TimeoutError|AbortError)\b/
 const LINE_CALL = /LINE (link rich menu|loading indicator|content download|reply|quick reply) failed: (\d{3})/
-const REFUSED = /Anthropic chat (refused|returned no text)/
+const REFUSED = /Anthropic chat (refused|returned no text)|carried the model's notes to itself/
 const LAMBDA_TIMEOUT = /Task timed out after [\d.]{1,8} seconds/
 const RUNTIME_EXIT = /Runtime exited/
 const DEADLINE = /\b(TimeoutError|AbortError)\b/
@@ -112,7 +112,7 @@ export function explain(cause) {
         ? step(`LINE 拒絕了呼叫（${cause.call}，${cause.status}），多半是 Channel access token 失效。`, '使用者沒收到回覆。', '到 LINE Developers 換一把 token，改 .env 後部署。', false)
         : step(`LINE 的呼叫失敗（${cause.call}，${cause.status}）。`, '使用者可能沒收到回覆。', '多半是 LINE 那邊的問題，先等等看；一直出現再查。', true)
     case 'refused':
-      return step('Claude 拒絕回答或沒有產生文字。', '使用者收到道歉。', '偶發可以不用管；一直出現，再請 Claude 看 prompt。', true)
+      return step('Claude 拒絕回答、沒有產生文字，或兩次都把寫給自己的筆記混進回覆。', '使用者收到道歉。', '偶發可以不用管；一直出現，再請 Claude 看 prompt。', true)
     case 'deadline':
       return step('AI 在 55 秒內沒答完。', '使用者收到道歉。', '多半是 AI 服務很慢，先等等看。', true)
     case 'lambda-timeout':

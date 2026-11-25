@@ -17,6 +17,11 @@ describe('OpenAiProvider', () => {
     mockFetch.mockReset()
   })
 
+  it('takes no short questions and has no model for worries, so neither is asked of it', () => {
+    expect(provider.answersQuestions).toBe(false)
+    expect(provider.answersWorries).toBe(false)
+  })
+
   describe('chatCompletion', () => {
     it('sends messages and returns the reply text', async () => {
       mockFetch.mockResolvedValueOnce({

@@ -61,6 +61,7 @@ describe('chat service', () => {
       // The provider has a model for worries, and its chat model sorts the talk as `kind`.
       const sortingAs = (kind) => {
         mockProvider.answersWorries = true
+        mockProvider.answersQuestions = true
         mockProvider.ask = jest.fn(async (question) => {
           if (!question.startsWith(SORTS)) throw new Error('not asked to judge a closing sentence here')
           if (kind instanceof Error) throw kind
@@ -75,6 +76,7 @@ describe('chat service', () => {
 
       afterEach(() => {
         delete mockProvider.answersWorries
+        delete mockProvider.answersQuestions
         delete mockProvider.ask
       })
 
@@ -108,7 +110,7 @@ describe('chat service', () => {
           ],
         })
 
-        await handleText('user1', 'token1', '對啊', 1795270000000)
+        await handleText('user1', 'token1', '對啊', Date.now())
 
         const question = mockProvider.ask.mock.calls[0][0]
         expect(question).toContain('使用者：最近跟身邊的人都有點疏遠\n無相界：這樣多久了')
@@ -151,13 +153,39 @@ describe('chat service', () => {
         expect(mockReplyMessage).toHaveBeenCalledWith('token1', '嗯，我在聽')
       })
 
-      it('goes straight to the chat model when too little time is left for two tries', async () => {
+      it.each([
+        ['a voice message that took 40 seconds to turn into text', 40_000],
+        ['a message that reached the bot 52 seconds late', 52_000],
+      ])('is not sorted when the model for worries would have no time to write, so sorting never costs the reply: %s', async (_, late) => {
         sortingAs('C')
 
-        await handleText('user1', 'token1', '最近跟身邊的人都有點疏遠', Date.now() - 50_000)
+        await handleText('user1', 'token1', '最近跟身邊的人都有點疏遠', Date.now() - late)
 
+        expect(mockProvider.ask).not.toHaveBeenCalled()
         expect(mockProvider.chatCompletion).toHaveBeenCalledTimes(1)
         expect(asked().worries).toBe(false)
+      })
+
+      it('sends what the model for worries wrote as it wrote it, closing choice and all', async () => {
+        sortingAs('C')
+        const written = '嗯，聽起來悶很久了\n\n是他們變了，還是你變了？'
+        mockProvider.chatCompletion.mockResolvedValue({ text: written })
+
+        await handleText('user1', 'token1', '最近跟身邊的人都有點疏遠', Date.now())
+
+        expect(mockReplyMessage).toHaveBeenCalledWith('token1', written)
+        expect(mockProvider.ask).toHaveBeenCalledTimes(1)
+      })
+
+      it('still takes the closing choice off what the chat model wrote', async () => {
+        sortingAs('A')
+        const sort = mockProvider.ask
+        mockProvider.ask = jest.fn(async (question) => (question.startsWith(SORTS) ? sort(question) : '是'))
+        mockProvider.chatCompletion.mockResolvedValue({ text: '真的，難得的好天氣\n\n是有出去走走，還是在家曬太陽' })
+
+        await handleText('user1', 'token1', '欸 今天天氣有夠好', Date.now())
+
+        expect(mockReplyMessage).toHaveBeenCalledWith('token1', '真的，難得的好天氣')
       })
     })
 
@@ -186,8 +214,9 @@ describe('chat service', () => {
 
     // Replies the model wrote for made-up conversations (2026-11-25).
     describe('a closing question that offers two choices', () => {
-      const JUDGES = '下面是一則聊天回覆的最後一句'
+      const JUDGES = '下面是一段聊天裡對方剛說的話'
       const judgedAs = (answer) => {
+        mockProvider.answersQuestions = true
         mockProvider.ask = jest.fn(async (question) => {
           if (!question.startsWith(JUDGES)) throw new Error('not asked to sort the talk here')
           if (answer instanceof Error) throw answer
@@ -202,6 +231,7 @@ describe('chat service', () => {
       const judged = () => mockProvider.ask.mock.calls.map(([question]) => question.match(/最後一句：「([\s\S]*)」$/)[1])
 
       afterEach(() => {
+        delete mockProvider.answersQuestions
         delete mockProvider.ask
       })
 
@@ -230,6 +260,35 @@ describe('chat service', () => {
         expect(judged()).toEqual(['你會這樣問，是今天特別悶？還是說最近發生了什麼事？'])
       })
 
+      it('goes with the question it carries on across a blank line, too', async () => {
+        judgedAs('是')
+
+        expect(await sentFor('嗯，聽起來很悶。\n\n是工作的事？\n\n還是家裡的事？')).toBe('嗯，聽起來很悶。')
+      })
+
+      it('leaves the sentence before it in place when that one is a statement', async () => {
+        judgedAs('是')
+
+        expect(await sentFor('嗯，加班加到這樣。\n\n聽起來你不是討厭這份工作，是太久沒休息了。還是其實兩個都有？')).toBe(
+          '嗯，加班加到這樣。\n\n聽起來你不是討厭這份工作，是太久沒休息了。',
+        )
+        expect(judged()).toEqual(['還是其實兩個都有？'])
+      })
+
+      it('is left off with the emoji after it', async () => {
+        judgedAs('是')
+
+        expect(await sentFor('聽起來很悶\n\n是他們變了，還是你變了？🙂')).toBe('聽起來很悶')
+      })
+
+      it('is judged with what the person just said in view', async () => {
+        judgedAs('否')
+
+        await sentFor('那就難熬了\n\n窗戶看得到外面嗎，還是被困在裡面', '今天\n被關在會議室一整天')
+
+        expect(mockProvider.ask.mock.calls[0][0]).toContain('對方剛說：「今天 被關在會議室一整天」')
+      })
+
       it('leaves an open question before it in place', async () => {
         judgedAs('是')
 
@@ -247,6 +306,14 @@ describe('chat service', () => {
         expect(await sentFor(written)).toBe(written)
       })
 
+      it('stays, unasked, with a provider that takes no short questions', async () => {
+        mockProvider.ask = jest.fn()
+        const written = '那就難熬了\n\n窗戶看得到外面嗎，還是被困在裡面'
+
+        expect(await sentFor(written)).toBe(written)
+        expect(mockProvider.ask).not.toHaveBeenCalled()
+      })
+
       it('stays when the chat model could not be asked', async () => {
         judgedAs(new Error('Anthropic ask failed: 529 overloaded_error'))
         jest.spyOn(console, 'warn').mockImplementation(() => {})
@@ -258,6 +325,8 @@ describe('chat service', () => {
       it.each([
         ['a reply with no 還是 in its closing sentence', '是工作的事，還是家裡的事，你剛剛沒說\n\n不過不急，慢慢講'],
         ['a reply that would have almost nothing left', '嗯\n\n是他們變了，還是你變了'],
+        ['a reply that would be left hanging on a lead-in', '聽起來你很在意這段友情。\n\n我想問你一件事：\n是他們變了，還是你變了？'],
+        ['a reply that would be left hanging on a lead-in without a colon', '聽起來你很在意這段友情\n\n想問你一件事\n是他們變了，還是你變了？'],
       ])('is not even asked about for %s', async (_, written) => {
         judgedAs('是')
 
@@ -270,6 +339,11 @@ describe('chat service', () => {
         ['a way of saying it the list of words would miss', '我想去死', [], '我有看到\n\n你是今天特別難受，還是這樣想有一陣子了？'],
         ['the reply itself', '就是提不起勁', [], '嗯，提不起勁\n\n你說的累，是身體累，還是有時候會覺得不想活了？'],
         ['what the person said two turns ago', '也還好啦 就很累', [{ role: 'user', content: '有時候會想，如果我消失了大家會不會比較輕鬆' }, { role: 'assistant', content: '這句我有看到' }], '嗯\n\n這個累，是今天特別累，還是已經一陣子了？'],
+        // 2026-11-26 review: lines that could go either way are left to the model, which asks; these were cut.
+        ['a line that could go either way: 一睡不醒', '最近真的好累，好想一睡不醒', [], '嗯，我有看到你說的，累成這樣。\n\n你說一睡不醒，是想好好睡一場，還是有不想再醒的念頭？'],
+        ['a line that could go either way: 想走了', '撐了好久 真的想走了', [], '撐了好久了，我有看到\n\n是想離開這份工作，還是有更重、想離開這一切的念頭？'],
+        ['a closing question after their safety, after words no list holds', '今天不太好', [], '嗯，今天不太好\n\n是累到想好好睡一覺，還是有不想再醒的念頭？'],
+        ['a closing question asking who is with them', '今天不太好', [], '嗯，今天不太好\n\n你現在是一個人，還是身邊有人陪？'],
       ])('stays, unasked, when the talk is near a crisis in %s', async (_, userText, recentTurns, written) => {
         judgedAs('是')
         mockGetContext.mockResolvedValue({ summary: null, previousSession: null, recentTurns })

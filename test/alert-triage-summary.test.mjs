@@ -90,6 +90,7 @@ describe('alert triage summary', () => {
 
     expect(needsClaude(fromLines('Handler error: Error: Anthropic chat failed: 401 authentication_error'))).toBe(false)
     expect(needsClaude(fromLines('Handler error: Error: LINE reply failed: 500'))).toBe(false)
+    expect(needsClaude(fromLines("Handler error: Error: the reply carried the model's notes to itself\n    at write (file:///var/task/services/chat.mjs:57:28)"))).toBe(false)
     expect(needsClaude(fromLines('Handler error: ReferenceError: x is not defined\n    at handler (file:///var/task/index.mjs:50:3)'))).toBe(true)
     expect(needsClaude(fromLines('Task timed out after 90.03 seconds'))).toBe(true)
     expect(needsClaude(fromLines('something nobody has seen'))).toBe(true)

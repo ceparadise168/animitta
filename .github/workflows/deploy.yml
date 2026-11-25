@@ -142,8 +142,8 @@ jobs:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: |
           aws lambda invoke --function-name "$FUNCTION" --cli-binary-format raw-in-base64-out --payload '{"selfTest":true}' self-test.json --query StatusCode --output text > /dev/null
-          jq -r '.body | fromjson | "anthropic: \(.anthropic)\nbedrock: \(.bedrock)\nsignature: \(.signature)"' self-test.json
-          jq -e '.body | fromjson | .signature == "ok" and (.anthropic == "ok" or .bedrock == "ok")' self-test.json > /dev/null
+          jq -r '.body | fromjson | "anthropic: \(.anthropic)\nworries: \(.worries)\nbedrock: \(.bedrock)\nsignature: \(.signature)"' self-test.json
+          jq -e '.body | fromjson | .signature == "ok" and (.anthropic == "ok" or .bedrock == "ok") and (.worries == "ok" or .worries == "off")' self-test.json > /dev/null
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"events":[]}' "$WEBHOOK_URL")
           if [ "$code" != 401 ]; then
             echo "::error::An unsigned webhook request got $code, not 401."

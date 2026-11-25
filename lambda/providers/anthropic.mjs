@@ -69,6 +69,10 @@ export class AnthropicProvider extends LlmProvider {
       process.env.SUMMARY_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
   }
 
+  get answersQuestions() {
+    return true
+  }
+
   get answersWorries() {
     return Boolean(this.#worriesModel)
   }
@@ -102,7 +106,7 @@ export class AnthropicProvider extends LlmProvider {
       attemptMs: () => this.#chatAttemptMs,
       backup: null,
     })
-    return readReplyText(data)
+    return readReplyText(data, 'ask')
   }
 
   // Anthropic first, once more if the failure looks temporary, then the
@@ -331,11 +335,11 @@ export class BedrockBackup {
   }
 }
 
-function readReplyText(data) {
+function readReplyText(data, op = 'chat') {
   if (data.stop_reason === 'refusal') {
-    throw new Error(`Anthropic chat refused: ${data.stop_details?.category ?? 'unknown'}`)
+    throw new Error(`Anthropic ${op} refused: ${data.stop_details?.category ?? 'unknown'}`)
   }
   const text = data.content.find((block) => block.type === 'text')?.text
-  if (!text) throw new Error(`Anthropic chat returned no text (stop_reason: ${data.stop_reason})`)
+  if (!text) throw new Error(`Anthropic ${op} returned no text (stop_reason: ${data.stop_reason})`)
   return text
 }

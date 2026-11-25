@@ -263,6 +263,16 @@ describe('AnthropicProvider', () => {
 
       await expect(provider.ask('這句是不是二選一？')).rejects.toThrow('Anthropic ask failed: 400 invalid_request_error')
     })
+
+    it('fails by its own name when the model refuses the question', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ stop_reason: 'refusal', stop_details: { category: 'general_harms' }, content: [] }) })
+
+      await expect(provider.ask('這句是不是二選一？')).rejects.toThrow('Anthropic ask refused: general_harms')
+    })
+
+    it('says it takes short questions', () => {
+      expect(provider.answersQuestions).toBe(true)
+    })
   })
 
   describe('summarize', () => {

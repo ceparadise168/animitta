@@ -2,12 +2,15 @@ import { createHmac } from 'node:crypto'
 import { AnthropicProvider, BedrockBackup } from './providers/anthropic.mjs'
 import { verifySignature } from './line.mjs'
 
-// Proves a deploy can still answer: one short question to Anthropic (and to
-// the model for worries, when there is one), one to the backup, and a LINE
+// Proves a deploy can still answer: one short question to Anthropic, one to
+// the model for worries when there is one, one to the backup, and a LINE
 // signature made and checked with the real secret. Traffic
 // is too thin for errors to show this within minutes. The results are the
 // bot's own failure messages (status and error type), nothing anyone said.
 const QUESTION = [{ role: 'user', content: '請只回一個字：好' }]
+// Anthropic is asked the way real messages are, with a system text marked as
+// the same for everyone, so a deploy also proves that form is taken.
+const AS_REAL_MESSAGES_ARE = [{ role: 'system', content: '這是部署後的自我檢查。', sameForEveryone: true }, ...QUESTION]
 const ANSWER_WITHIN_MS = 15_000
 
 export async function selfTest({
@@ -16,25 +19,18 @@ export async function selfTest({
   secret = process.env.LINE_CHANNEL_SECRET,
 } = {}) {
   const results = {
-    anthropic: await outcome(async () => {
-      await anthropic.chatCompletion(QUESTION, { signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })
-      // A wrong name for it would turn every worry into the chat model's answer, unnoticed.
-      if (anthropic.answersWorries) await forWorries(anthropic)
-    }),
+    anthropic: await outcome(() => anthropic.chatCompletion(AS_REAL_MESSAGES_ARE, { signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })),
+    // A wrong name for it would turn every worry into the chat model's answer,
+    // unnoticed, so a deploy does not pass with it failing.
+    worries: anthropic.answersWorries
+      ? await outcome(() => anthropic.chatCompletion(AS_REAL_MESSAGES_ARE, { worries: true, signal: AbortSignal.timeout(ANSWER_WITHIN_MS) }))
+      : 'off',
     bedrock: backup
       ? await outcome(() => backup.send('chat', { max_tokens: 16, messages: QUESTION }, AbortSignal.timeout(ANSWER_WITHIN_MS)))
       : 'off',
     signature: signatureRoundTrip(secret),
   }
   return { statusCode: 200, body: JSON.stringify(results) }
-}
-
-async function forWorries(anthropic) {
-  try {
-    await anthropic.chatCompletion(QUESTION, { worries: true, signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })
-  } catch (err) {
-    throw new Error(`model for worries: ${err.message}`)
-  }
 }
 
 async function outcome(call) {

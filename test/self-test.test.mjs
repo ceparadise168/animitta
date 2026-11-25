@@ -9,7 +9,7 @@ describe('selfTest', () => {
   it('reports each part working', async () => {
     const backup = { send: jest.fn().mockResolvedValue({ content: [{ type: 'text', text: '好' }] }) }
 
-    expect(await results({ anthropic: answers(), backup, secret: 'line-secret' })).toEqual({ anthropic: 'ok', bedrock: 'ok', signature: 'ok' })
+    expect(await results({ anthropic: answers(), backup, secret: 'line-secret' })).toEqual({ anthropic: 'ok', worries: 'off', bedrock: 'ok', signature: 'ok' })
   })
 
   it('names what failed, by the bot\'s own failure message', async () => {
@@ -18,12 +18,13 @@ describe('selfTest', () => {
 
     expect(await results({ anthropic, backup, secret: 'line-secret' })).toEqual({
       anthropic: 'Anthropic chat failed: 401 authentication_error',
+      worries: 'off',
       bedrock: 'Bedrock chat failed: 403 AccessDeniedException',
       signature: 'ok',
     })
   })
 
-  it('asks the model for worries too when there is one, and names it when it is the one that failed', async () => {
+  it('asks the model for worries too when there is one, and reports it on a line of its own', async () => {
     const both = { answersWorries: true, chatCompletion: jest.fn().mockResolvedValue({ text: '好' }) }
     const wrongName = {
       answersWorries: true,
@@ -33,9 +34,20 @@ describe('selfTest', () => {
       }),
     }
 
-    expect((await results({ anthropic: both, backup: null, secret: 'line-secret' })).anthropic).toBe('ok')
+    expect(await results({ anthropic: both, backup: null, secret: 'line-secret' })).toMatchObject({ anthropic: 'ok', worries: 'ok' })
     expect(both.chatCompletion.mock.calls.map(([, options]) => Boolean(options.worries))).toEqual([false, true])
-    expect((await results({ anthropic: wrongName, backup: null, secret: 'line-secret' })).anthropic).toBe('model for worries: Anthropic chat failed: 404 not_found_error')
+    expect(await results({ anthropic: wrongName, backup: null, secret: 'line-secret' })).toMatchObject({
+      anthropic: 'ok',
+      worries: 'Anthropic chat failed: 404 not_found_error',
+    })
+  })
+
+  it('asks Anthropic the way real messages are sent, with a system text that is the same for everyone', async () => {
+    const anthropic = answers()
+
+    await selfTest({ anthropic, backup: null, secret: 's' })
+
+    expect(anthropic.chatCompletion.mock.calls[0][0][0]).toMatchObject({ role: 'system', sameForEveryone: true })
   })
 
   it('says the backup is off when none is configured, and when the LINE secret is missing', async () => {
@@ -50,6 +62,7 @@ describe('selfTest', () => {
     const [op, body, signal] = backup.send.mock.calls[0]
     expect(op).toBe('chat')
     expect(body.max_tokens).toBeLessThanOrEqual(16)
+    expect(body.messages.map(({ role }) => role)).toEqual(['user'])
     expect(signal).toBeInstanceOf(AbortSignal)
   })
 })
