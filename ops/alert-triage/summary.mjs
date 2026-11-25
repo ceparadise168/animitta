@@ -50,6 +50,7 @@ export function causeOf(line) {
     return {
       kind: 'provider',
       service: primary?.[1] ?? 'Anthropic',
+      op: (primary ?? backup)[2],
       status: primary?.[3] ?? (ABORTED.test(primaryPart) ? 'timeout' : 'unknown'),
       type: listed(TYPES, primary?.[4]),
       backup: backup ? [backup[3], listed(TYPES, backup[4])].filter(Boolean).join(' ') : null,
@@ -72,7 +73,7 @@ export function causeOf(line) {
 }
 
 export const signatureOf = (cause) =>
-  [cause.kind, cause.service, cause.status, cause.type, cause.call, cause.errorClass, cause.frames?.[0]]
+  [cause.kind, cause.service, cause.op, cause.status, cause.type, cause.call, cause.errorClass, cause.frames?.[0]]
     .filter(Boolean)
     .join(':')
 
@@ -141,11 +142,16 @@ function explainProvider(cause) {
   }
 }
 
-function explainPrimary({ service, status, type, backup }) {
+const OPS = {
+  chat: { during: '', slow: '超過 20 秒沒回', seen: '使用者收到道歉。' },
+  summary: { during: '整理記憶時', slow: '整理記憶時太久沒回', seen: '使用者有收到回覆，只是記憶整理沒做完，下一則訊息會再試。' },
+}
+
+function explainPrimary({ service, op, status, type, backup }) {
+  const { during, slow, seen } = OPS[op]
   const alsoBackup = backup ? `，Bedrock 備援也失敗（${backup}）` : ''
-  const seen = '使用者收到道歉。'
-  if (status === 'timeout') return step(`${service} 超過 20 秒沒回${alsoBackup}。`, seen, '多半是服務很慢，通常會自己恢復。', true)
-  const failed = `${service} 失敗（${[status, type].filter(Boolean).join(' ')}）${alsoBackup}`
+  if (status === 'timeout') return step(`${service} ${slow}${alsoBackup}。`, seen, '多半是服務很慢，通常會自己恢復。', true)
+  const failed = `${service} ${during}失敗（${[status, type].filter(Boolean).join(' ')}）${alsoBackup}`
   if (status === '401' || type === 'authentication_error') {
     const where = service === 'Anthropic' ? 'platform.claude.com' : '服務的主控台'
     return step(`${failed}：金鑰失效或被撤銷。`, seen, `到 ${where} 產生新金鑰，改 .env 後部署（你手動）。`, false)

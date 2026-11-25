@@ -154,7 +154,7 @@ const taipei = (ms) => new Date(ms + 8 * 3600_000).toISOString().slice(11, 16)
 // SNS takes a short subject; the Chinese is in the body.
 function subjectOf(alarmName, causes) {
   const top = causes[0]
-  const what = top ? [top.kind, top.service, top.status].filter(Boolean).join(' ') : 'no matching log lines'
+  const what = top ? [top.kind, top.service, top.op, top.status].filter(Boolean).join(' ') : 'no matching log lines'
   return `[animitta] ${alarmName.replace('animitta-', '')}: ${what}`.slice(0, 99)
 }
 
