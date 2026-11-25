@@ -8,17 +8,17 @@
 
 - **LINE**：訊息先送到 LINE，再轉給無相界。
 - **Amazon 的東京機房（AWS）**：無相界的程式跑在這裡，記憶也存在這裡的資料庫。
-- **Claude**：要產生回覆，你傳的文字會交給 Anthropic 的 Claude 處理。
+- **AI 服務**：要產生回覆，你傳的文字會交給「關於」裡寫的 AI 服務處理，現在是 Anthropic 的 Claude。
 - **Amazon 語音辨識**：只有傳語音時才會用到。
 
 ### 「關於」裡的每一句
 
-- **對話傳送與存放都加密**：對外的連線都走 https。資料庫（DynamoDB）一律加密存放，語音暫存區（S3）也設了加密（[`cdk/lib/animitta-stack.ts`](cdk/lib/animitta-stack.ts)）。
-- **記憶只用來接話**：記憶只會在產生回覆、整理成重點的時候交給 Claude（[`lambda/services/chat.mjs`](lambda/services/chat.mjs)、[`lambda/services/memory.mjs`](lambda/services/memory.mjs)）。
-- **30 天未互動自動清空**：每一句話在說完 30 天後到期，整理出來的重點在你最後一次聊天 30 天後到期。到期的程式就不再讀，資料庫實際刪掉可能再晚幾天（[`lambda/services/memory.mjs`](lambda/services/memory.mjs)）。
+- **對話傳送與存放都加密**：對外的連線都走 https。資料庫（DynamoDB）依 [AWS 的預設](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/EncryptionAtRest.html)一律加密存放；語音暫存區（S3）在 [`cdk/lib/animitta-stack.ts`](cdk/lib/animitta-stack.ts) 設了加密。
+- **記憶只用來接話**：記憶只會在產生回覆、整理成重點的時候交給 AI 服務（[`lambda/services/chat.mjs`](lambda/services/chat.mjs)、[`lambda/services/memory.mjs`](lambda/services/memory.mjs)）。
+- **30 天未互動自動清空**：30 天沒來聊天，對話和重點都會到期。還在聊的話，比較早的對話會被整理成一段重點，這段重點每聊一次就再延 30 天，所以想全部清掉，請按「清除記憶」。到期的資料程式就不再讀，資料庫實際刪掉可能再晚幾天（[`lambda/services/memory.mjs`](lambda/services/memory.mjs)）。
 - **隨時按「清除記憶」**：刪掉你所有的對話和重點（同一個檔案裡的 `clearMemory`）。
 - **不用於訓練**：Anthropic 的[商業條款](https://www.anthropic.com/legal/commercial-terms)寫明「Anthropic may not train models on Customer Content from Services」，也就是不拿 API 收到的內容訓練模型。
-- **語音經 Amazon 轉文字後即刪**：轉完就把錄音和轉出來的文字刪掉；萬一沒刪到，暫存區設了一天到期，會自動清掉（[`lambda/services/transcribe.mjs`](lambda/services/transcribe.mjs)）。AWS 帳號如果沒有關閉「讓 Amazon 用內容改善 AI 服務」，語音會自動暫停、不送出（[`lambda/services/ai-opt-out.mjs`](lambda/services/ai-opt-out.mjs)）。
+- **語音經 Amazon 轉文字後即刪**：轉完就把錄音和 Amazon 的轉錄檔刪掉；萬一沒刪到，暫存區設了一天到期，會自動清掉（[`lambda/services/transcribe.mjs`](lambda/services/transcribe.mjs)）。轉出來的文字會跟你打的字一樣，記進記憶。AWS 帳號如果沒有關閉「讓 Amazon 用內容改善 AI 服務」，語音會自動暫停、不送出（[`lambda/services/ai-opt-out.mjs`](lambda/services/ai-opt-out.mjs)）。
 - **每月上限 30 分鐘**：用量只記秒數，為了把每個月的上限算準，會留 40 天，清除記憶不會刪到它（[`lambda/services/voice.mjs`](lambda/services/voice.mjs)）。
 
 另外，出錯時寫下的紀錄不會有你打的字，紀錄也只留 30 天（[`lambda/services/chat.mjs`](lambda/services/chat.mjs)）。
@@ -26,7 +26,7 @@
 ### 有兩件事，程式碼證明不了
 
 - **存著的記憶，我技術上看得到**：資料庫在我的 AWS 帳號裡。我承諾不看；修問題時只看有幾筆，不看內容。
-- **你沒辦法從外面確認，線上跑的就是這一版**：我只部署這裡 main 分支上的版本（[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)、[`scripts/deploy.mjs`](scripts/deploy.mjs)）。
+- **你沒辦法從外面確認，線上跑的就是這一版**：我的做法是只部署這裡 main 分支上的版本。GitHub 的自動部署只接受 main，而且要我按核准（[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)）；從電腦部署的指令也會先檢查（[`scripts/deploy.mjs`](scripts/deploy.mjs)）。不過這些關卡都由我掌握，所以終究是我的承諾。
 
 ---
 
@@ -120,7 +120,7 @@ node scripts/setup-richmenu.mjs
 See `.env.example` for all available configuration options.
 
 Key variables:
-- `LLM_PROVIDER`: `anthropic` (what runs) or `openai`
+- `LLM_PROVIDER`: `anthropic` (what runs, as in `.env.example`) or `openai` (what the code falls back to when it is unset)
 - `CHAT_MODEL_OPENAI`: Model for conversation (e.g., `gpt-4.1-mini`)
 - `BEDROCK_MODEL_ID`: The backup for Anthropic, off unless set (for example `jp.anthropic.claude-haiku-4-5-20251001-v1:0`). A limit Eric set himself in the Console never goes to the backup. It must be a `jp.` profile of the same model as `CHAT_MODEL_ANTHROPIC`, or synth fails, because 關於 tells users it is the same model, run in Japan. Before it can answer, someone with admin rights submits Anthropic's first-time-use form in the Bedrock console and sends one message in the playground, which also subscribes the account through AWS Marketplace; then the self-test shows `"bedrock":"ok"`
 - `MAX_RECENT_TURNS`: Number of recent conversation turns to keep (default: 5)
@@ -170,7 +170,7 @@ Edit `lambda/prompt.mjs` — the `SYSTEM_PROMPT` defines the bot's personality, 
 
 ### Adding Scripture
 
-Add quotes to the `<經文庫 — 純金剛經>` section in `prompt.mjs`, under a theme and with the chapter each comes from. Each must be that chapter's text in `lambda/diamond-sutra.json` word for word; `test/sutra-text.test.mjs` checks it. The bot selects relevant quotes based on conversation context.
+Add quotes to the `<經文庫 — 純金剛經>` section in `prompt.mjs`, under a theme and with the chapter each comes from. Each must be that chapter's text in `lambda/diamond-sutra.json` word for word, punctuation aside; `test/sutra-text.test.mjs` checks it. The bot selects relevant quotes based on conversation context.
 
 ### Switching LLM Provider
 
