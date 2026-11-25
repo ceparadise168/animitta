@@ -2,7 +2,7 @@ import { replyMessage, replyWithQuickReply } from './line.mjs'
 import { clearMemory, getContext, RETENTION_DAYS } from './services/memory.mjs'
 import { handleText, replyAndRemember } from './services/chat.mjs'
 import { VOICE_MINUTES_PER_MONTH } from './services/voice.mjs'
-import { DAILY_LINES, askAboutLine, lineAt, lineIn, lineReply, passageOf, showsPassageOf, todaysLine } from './sutra.mjs'
+import { DAILY_LINES, askAboutLine, lineAt, lineIn, lineReply, passageOf, showsPassageOf, taipeiDay, todaysLine } from './sutra.mjs'
 
 const CASUAL_CHAT_STARTERS = [
   '嗨～今天過得還好嗎？\n想到什麼都可以直接聊。',
@@ -105,10 +105,20 @@ const PRESSED_TODAYS_LINE = '（按了選單的「每日一句」）'
 const PRESSED_NEXT_LINE = '（按了「再給一句」）'
 
 // What the bot still remembers word for word: this session's turns, and the
-// session before until it is folded into the summary.
-const rememberedTurns = ({ recentTurns, previousSession }) => [...(previousSession?.turns ?? []), ...recentTurns]
+// session before until it is folded into the summary. A fixed line needs none
+// of it, so when memory cannot be read the line still goes out, as it did
+// before it depended on memory; saving the exchange afterwards fails loudly.
+async function readMemory(userId) {
+  try {
+    return await getContext(userId)
+  } catch (err) {
+    console.warn(`Memory could not be read for a fixed line: ${err.name}`)
+    return { recentTurns: [], previousSession: null }
+  }
+}
+const everyTurn = ({ recentTurns, previousSession }) => [...(previousSession?.turns ?? []), ...recentTurns]
 
-// The daily lines shown to this person in what the bot remembers, oldest first.
+// The daily lines shown in these turns, oldest first.
 function linesSeen(turns) {
   return turns.flatMap((turn, i) => {
     const pressed = turn.role === 'user' && [PRESSED_TODAYS_LINE, PRESSED_NEXT_LINE].includes(turn.content)
@@ -117,17 +127,30 @@ function linesSeen(turns) {
   })
 }
 
+// Today's reading starts at the day's line and goes on from the last line read
+// today, past every line still remembered, so a press never brings a line back
+// (2026-11-25: three presses in six minutes brought one line three times).
+// Read today means in this session, or in the one before if it ended today. The
+// first reply after a break folds that one into the summary, so the lines shown
+// since are what still say how far the reading got (2026-11-25 review: after a
+// break, presses went 20, 19, 20).
+function nextLine(memory, sentAt) {
+  const { recentTurns, previousSession } = memory
+  const endedToday = previousSession && taipeiDay(Date.parse(previousSession.endsAt)) === taipeiDay(sentAt)
+  const readToday = linesSeen([...(endedToday ? previousSession.turns : []), ...recentTurns])
+  const seen = new Set(linesSeen(everyTurn(memory)).map(({ index }) => index))
+  let line = readToday.length ? lineAt(readToday.at(-1).index + 1) : todaysLine(sentAt)
+  for (let tries = 1; tries < DAILY_LINES.length && seen.has(line.index); tries++) line = lineAt(line.index + 1)
+  return line
+}
+
 // Remembered like the casual-chat opener, so whatever the person says next is
-// answered as a reply to the line, with its chapter at hand if they ask. Once
-// today's line has been shown, pressing again reads on from the last line shown
-// instead of bringing the same one back (2026-11-25: three presses in six
-// minutes brought one line three times).
+// answered as a reply to the line, with its chapter at hand if they ask. Only
+// the day's line carries the 每日一句 title.
 async function handleTodaysLine(userId, replyToken, sentAt) {
-  const today = todaysLine(sentAt)
-  const seen = linesSeen(rememberedTurns(await getContext(userId)))
-  const readOn = seen.some(({ index }) => index === today.index)
-  const shown = readOn ? lineAt(seen.at(-1).index + 1) : today
-  return replyAndRemember(userId, replyToken, PRESSED_TODAYS_LINE, lineReply(shown, { first: !readOn }), sentAt, {
+  const shown = nextLine(await readMemory(userId), sentAt)
+  const first = shown.index === todaysLine(sentAt).index
+  return replyAndRemember(userId, replyToken, PRESSED_TODAYS_LINE, lineReply(shown, { first }), sentAt, {
     quickReply: lineFollowUps(shown),
   })
 }
@@ -143,7 +166,7 @@ async function handleNextLine(userId, replyToken, shown, sentAt) {
 // person has it just above, and the model has it from the lookup either way
 // (2026-11-25: one chapter three times in six minutes).
 async function handleMoreAboutLine(userId, replyToken, shown, sentAt) {
-  const shownBefore = rememberedTurns(await getContext(userId)).some(
+  const shownBefore = everyTurn(await readMemory(userId)).some(
     ({ role, content }) => role === 'assistant' && showsPassageOf(content, shown),
   )
   return handleText(userId, replyToken, askAboutLine(shown), sentAt, shownBefore ? {} : { before: passageOf(shown) })

@@ -256,9 +256,11 @@ export function lineAt(index) {
   return { index: at, line, chapter: CHAPTERS[chapterNumber - 1] }
 }
 
+/** The Taipei calendar day a time falls on, counted in days. */
+export const taipeiDay = (ms) => Math.floor((ms + TAIPEI_OFFSET_MS) / DAY_MS)
+
 export function todaysLine(now = Date.now()) {
-  const at = Number.isFinite(now) ? now : Date.now()
-  return lineAt(Math.floor((at + TAIPEI_OFFSET_MS) / DAY_MS))
+  return lineAt(taipeiDay(Number.isFinite(now) ? now : Date.now()))
 }
 
 // The day's line says what it is; the ones 再給一句 brings come bare.

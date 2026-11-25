@@ -188,13 +188,17 @@ describe('conversation memory, end to end', () => {
       expect(lineReplies).toEqual([lineReply(first, { first: true }), lineReply(lineAt(first.index + 1))])
     })
 
-    it("reads on after a break too, while the session before still holds today's line", async () => {
-      const sentAt = lineClock + 1000
-      putTurn(180, '（按了選單的「每日一句」）', lineReply(todaysLine(sentAt), { first: true }))
+    // The first reply after a break folds the session before into the summary,
+    // today's line with it; the presses after that must still go forward.
+    it('keeps reading forward after a break, press after press', async () => {
+      const today = todaysLine(lineClock + 1000)
+      putTurn(180, '（按了選單的「每日一句」）', lineReply(today, { first: true }))
 
       await press('action=daily_line')
+      await press('action=daily_line')
+      await press('action=daily_line')
 
-      expect(lineReplies).toEqual([lineReply(lineAt(todaysLine(sentAt).index + 1))])
+      expect(lineReplies).toEqual([1, 2, 3].map((ahead) => lineReply(lineAt(today.index + ahead))))
     })
 
     it('shows a chapter once: 多了解這一段 under the next line of it sends the explanation alone', async () => {
