@@ -42,17 +42,20 @@ describe('commands', () => {
     jest.restoreAllMocks()
   })
 
-  it('starts casual chat with a low-pressure invitation instead of a koan quiz', async () => {
-    jest.spyOn(Math, 'random').mockReturnValue(0)
+  it('opens casual chat without the sutra, because 每日一句 is the way in with a sutra line', async () => {
+    const random = jest.spyOn(Math, 'random')
+    for (let i = 0; i < 100; i++) {
+      random.mockReturnValue(i / 100)
+      await handleCommand('user1', 'token1', '@隨意聊聊')
+    }
 
-    await handleCommand('user1', 'token1', '@隨意聊聊')
-
-    const [userId, replyToken, , text] = mockReplyAndRemember.mock.calls[0]
-    expect([userId, replyToken]).toEqual(['user1', 'token1'])
-    expect(text).toContain('不用先想好怎麼說')
-    expect(text).toContain('金剛經')
-    expect(text).not.toContain('今天想跟你分享一句金剛經')
-    expect(text).not.toContain('如果沒有來也沒有去')
+    const calls = mockReplyAndRemember.mock.calls
+    expect(new Set(calls.map(([, , , text]) => text)).size).toBeGreaterThan(1)
+    for (const [userId, replyToken, remembered, text] of calls) {
+      expect([userId, replyToken, remembered]).toEqual(['user1', 'token1', '（按了選單的「隨意聊聊」）'])
+      expect(text).not.toMatch(/金剛經|經文/)
+      for (const [, quoted] of text.matchAll(/「([^」]+)」/g)) expect(isCommand(`@${quoted}`)).toBe(true)
+    }
   })
 
   it('describes the product as Diamond Sutra conversation, not a scripture dispenser', async () => {
