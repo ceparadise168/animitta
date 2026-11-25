@@ -90,6 +90,8 @@ export class AnimittaStack extends cdk.Stack {
         CHAT_MODEL_ANTHROPIC,
         BEDROCK_MODEL_ID,
         CHAT_EFFORT_ANTHROPIC: process.env.CHAT_EFFORT_ANTHROPIC || '',
+        WORRIES_MODEL_ANTHROPIC: process.env.WORRIES_MODEL_ANTHROPIC || '',
+        WORRIES_EFFORT_ANTHROPIC: process.env.WORRIES_EFFORT_ANTHROPIC || '',
         SUMMARY_MODEL_ANTHROPIC: process.env.SUMMARY_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001',
         LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
         LINE_CHANNEL_SECRET: process.env.LINE_CHANNEL_SECRET || '',
@@ -135,7 +137,9 @@ export class AnimittaStack extends cdk.Stack {
       )
     }
 
-    new logs.LogRetention(this, 'HandlerLogRetention', {
+    // The alarms' metric filters hang on this log group, and on a new account
+    // nothing else makes it before them.
+    const handlerLogs = new logs.LogRetention(this, 'HandlerLogRetention', {
       logGroupName: `/aws/lambda/${fn.functionName}`,
       retention: logRetentionWithin(CONVERSATION_TTL_DAYS),
     })
@@ -157,6 +161,9 @@ export class AnimittaStack extends cdk.Stack {
     this.addFailureAlarm(fn, alertTopic)
     this.addVoiceLimitAlarm(fn, alertTopic)
     if (BEDROCK_MODEL_ID) this.addBackupAlarm(fn, alertTopic)
+    for (const filter of ['HandlerErrorFilter', 'VoiceLimitFilter', 'BackupFilter']) {
+      this.node.tryFindChild(filter)?.node.addDependency(handlerLogs)
+    }
     this.addKeyExpiryReminders(alertTopic, process.env.ANTHROPIC_KEY_EXPIRES_ON)
     this.addAlertTriage(fn, table, alertTopic, alertEmail)
     this.addDeployRole(fn, alertTopic)

@@ -12,6 +12,21 @@ The [README](../README.md) is the overview, in Traditional Chinese. This page is
 - Stickers are answered: LINE's sticker keywords (and the text on message stickers) go to the model
 - Photos, videos, files, locations and audio links from outside LINE get a short "type or send voice instead" reply, which is remembered
 
+## Which model answers
+
+One model answers everything unless `WORRIES_MODEL_ANTHROPIC` is set. With it set, the chat model first sorts each typed message (voice and stickers too) as small talk, a question about the sutra, or worries, with the last three exchanges in view so that a bare 對啊 stays with what it answers. Worries go to that second model, run at `WORRIES_EFFORT_ANTHROPIC`; small talk and the sutra stay with the chat model. Sorting takes about half a second. 多了解這一段 is a question about the sutra by construction and is not sorted.
+
+The model for worries reads the same prompt with two additions (`lambda/prompt.mjs`): a paragraph telling it not to hold back too far, since the prompt's many "don't"s were written for a model that pushes, and a sentence saying that a sticker with 想死 written on it is said plainly.
+
+Nothing here can cost a person their reply. A message that could not be sorted is answered by the chat model. When the model for worries fails, refuses, or is still writing with 8 seconds left, the chat model answers instead (logged as `The model for worries did not answer`). The backup on Amazon Bedrock is the chat model only, so it never stands in for the other one.
+
+Before a reply goes out:
+
+- A reply carrying the model's notes to itself (`<reasoning>`, `<invoke …>`) is asked for once more; a second one becomes the apology.
+- A closing question that makes the person pick one of two readings of their own life (是他們變了，還是你變了) is left off. Whether the closing sentence is one is asked of the chat model, since 還是 also means "still" and "had better"; it is asked only when the sentence has 還是 in it, and never when the talk is near a crisis or almost nothing would be left to send.
+
+The prompt and its demos are the same for everyone, so they are sent as a block Anthropic may keep for a few minutes and bill at a tenth when read again.
+
 ## 每日一句 (a line a day)
 
 每日一句 (a line a day) shows one line of the sutra, word for word with its chapter, in the sutra's order (27 lines; those that read as a rebuke when shown alone are left out). The first press on a Taipei day shows that day's line, the same for everyone. Pressing again reads on from the last line read that day, skipping any line the bot remembers showing, so a press never goes back, never repeats a remembered line, and is never a fresh draw. Only the day's line carries the 每日一句 title. It is remembered like the casual-chat opener, and if memory cannot be read the day's line still goes out.
@@ -70,7 +85,7 @@ The backup is off unless `BEDROCK_MODEL_ID` is set (for example `jp.anthropic.cl
 aws lambda invoke --function-name animitta --payload '{"selfTest":true}' --cli-binary-format raw-in-base64-out out.json
 ```
 
-It asks Anthropic and the backup a one-word question and checks a LINE signature with the real secret, then writes `{"anthropic":"ok","bedrock":"ok","signature":"ok"}` or the failure messages. Only a direct invoke runs it; requests through the webhook URL carry `requestContext` and never do.
+It asks Anthropic (the chat model, and the model for worries when there is one) and the backup a one-word question and checks a LINE signature with the real secret, then writes `{"anthropic":"ok","bedrock":"ok","signature":"ok"}` or the failure messages. Only a direct invoke runs it; requests through the webhook URL carry `requestContext` and never do.
 
 ## Alerts
 
