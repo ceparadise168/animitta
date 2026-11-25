@@ -43,17 +43,21 @@ describe('selfTest', () => {
     })
   })
 
-  it('does not call worries answered when the talk cannot be sorted, since they would never reach their model', async () => {
-    const cannotSort = {
-      answersWorries: true,
-      ask: jest.fn().mockRejectedValue(new Error('Anthropic ask failed: 400 invalid_request_error')),
-      chatCompletion: jest.fn().mockResolvedValue({ text: '好' }),
-    }
+  it.each([
+    ['the sorting question fails', jest.fn().mockRejectedValue(new Error('Anthropic ask failed: 400 invalid_request_error')), 'Anthropic ask failed: 400 invalid_request_error'],
+    ['its answer is none the bot can read', jest.fn().mockResolvedValue('好'), 'the sorting answered neither A, B nor C'],
+  ])('does not call worries answered when %s, since they would never reach their model', async (_, ask, failure) => {
+    const cannotSort = { answersWorries: true, ask, chatCompletion: jest.fn().mockResolvedValue({ text: '好' }) }
 
-    expect(await results({ anthropic: cannotSort, backup: null, secret: 'line-secret' })).toMatchObject({
-      anthropic: 'ok',
-      worries: 'Anthropic ask failed: 400 invalid_request_error',
-    })
+    expect(await results({ anthropic: cannotSort, backup: null, secret: 'line-secret' })).toMatchObject({ anthropic: 'ok', worries: failure })
+  })
+
+  it('sorts with the question the bot asks of every message', async () => {
+    const anthropic = { answersWorries: true, ask: jest.fn().mockResolvedValue('A'), chatCompletion: jest.fn().mockResolvedValue({ text: '好' }) }
+
+    await selfTest({ anthropic, backup: null, secret: 's' })
+
+    expect(anthropic.ask.mock.calls[0][0]).toMatch(/^你在替一個聊天機器人分派訊息[\s\S]*最新一則：午餐吃什麼好$/)
   })
 
   it('asks Anthropic the way real messages are sent, with a system text that is the same for everyone', async () => {

@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto'
 import { AnthropicProvider, BedrockBackup } from './providers/anthropic.mjs'
 import { verifySignature } from './line.mjs'
+import { sortTalk } from './services/chat.mjs'
 
 // Proves a deploy can still answer: one short question to Anthropic, one to
 // the model for worries when there is one, one to the backup, and a LINE
@@ -20,13 +21,14 @@ export async function selfTest({
 } = {}) {
   const results = {
     anthropic: await outcome(() => anthropic.chatCompletion(AS_REAL_MESSAGES_ARE, { signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })),
-    // Worries reach their model when the talk can be sorted, which is a short
-    // question, and when that model answers. Either one failing would turn
-    // every worry into the chat model's answer, unnoticed, so a deploy does
-    // not pass with it.
+    // Worries reach their model when the talk can be sorted and that model
+    // answers. Either one failing would turn every worry into the chat
+    // model's answer, unnoticed, so a deploy does not pass with it. The
+    // sorting is the bot's own: its question, its time limit, an answer it
+    // can read.
     worries: anthropic.answersWorries
       ? await outcome(async () => {
-          await anthropic.ask('請只回一個字母：A', { signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })
+          await sortTalk(anthropic, { recentTurns: [], previousSession: null }, '午餐吃什麼好', AbortSignal.timeout(ANSWER_WITHIN_MS))
           await anthropic.chatCompletion(AS_REAL_MESSAGES_ARE, { worries: true, signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })
         })
       : 'off',
