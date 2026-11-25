@@ -41,9 +41,10 @@ global.fetch = async (url, init) => {
     return ok({ stop_reason: 'end_turn', content: [{ type: 'text', text: '（模型的回覆）' }] })
   }
   const prompt = body.messages[0].content
-  const old = prompt.match(/舊摘要：\n([\s\S]*?)\n\n需要壓縮的對話/)?.[1] ?? null
+  const old = prompt.match(/<舊摘要>\n([\s\S]*?)\n<\/舊摘要>/)?.[1] ?? null
+  const folded = prompt.match(/<要濃縮的對話>\n([\s\S]*?)\n<\/要濃縮的對話>/)[1]
   try {
-    return ok({ content: [{ type: 'text', text: await llm.summarize(old, prompt.split('需要壓縮的對話：\n')[1]) }] })
+    return ok({ content: [{ type: 'text', text: await llm.summarize(old, folded) }] })
   } catch {
     return { ok: false, status: 529, json: async () => ({}) }
   }

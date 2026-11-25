@@ -123,11 +123,11 @@ export class AnthropicProvider extends LlmProvider {
 
   async summarize(existingSummary, turns) {
     const turnsText = turns
-      .map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
+      .map((t) => `[${t.role === 'user' ? '使用者' : '無相界'}] ${t.content}`)
       .join('\n')
 
     const prompt =
-      '以中性、第三人稱、紀錄員視角，將以下對話歷史濃縮為不超過 500 字的繁體中文摘要。\n' +
+      '以中性、第三人稱、紀錄員視角，將下面的對話濃縮為不超過 500 字的繁體中文摘要。\n' +
       '\n' +
       '保留：\n' +
       '- 使用者主動提到的關鍵事實（家庭/工作/健康/興趣等具體資訊）\n' +
@@ -143,8 +143,9 @@ export class AnthropicProvider extends LlmProvider {
       '\n' +
       '**重要**：這份摘要是給未來對話的 bot 當 reference 用、是 context info、不是 voice template。bot 讀完不應該模仿摘要的語氣。\n' +
       '\n' +
-      (existingSummary ? `舊摘要：\n${existingSummary}\n\n` : '') +
-      `需要壓縮的對話：\n${turnsText}`
+      (existingSummary ? `<舊摘要>\n${existingSummary}\n</舊摘要>\n\n` : '') +
+      `<要濃縮的對話>\n${turnsText}\n</要濃縮的對話>\n\n` +
+      '請只輸出新的摘要本身。你不是對話裡的任何一方，不要回覆任何人，也不要接著寫對話。'
 
     const body = { max_tokens: 1024, temperature: 0.3, messages: [{ role: 'user', content: prompt }] }
     const data = await this.#send('summary', this.#summaryModel, body, {
