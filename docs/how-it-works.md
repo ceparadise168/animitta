@@ -14,9 +14,11 @@ The [README](../README.md) is the overview, in Traditional Chinese. This page is
 
 ## 每日一句 (a line a day)
 
-每日一句 (a line a day) shows one line of the sutra, word for word with its chapter, the same for everyone on a Taipei day and in the sutra's order (27 lines; those that read as a rebuke when shown alone are left out), so pressing again is never a fresh draw. It is remembered like the casual-chat opener.
+每日一句 (a line a day) shows one line of the sutra, word for word with its chapter, in the sutra's order (27 lines; those that read as a rebuke when shown alone are left out). The first press on a Taipei day shows that day's line, the same for everyone. Pressing again reads on from the last line read that day, skipping any line the bot remembers showing, so a press never goes back, never repeats a remembered line, and is never a fresh draw. Only the day's line carries the 每日一句 title. It is remembered like the casual-chat opener, and if memory cannot be read the day's line still goes out.
 
-Under it, two Quick Reply buttons: 多了解這一段 sends the whole chapter as it reads, then the model's plain explanation (the passage never comes from the model, which mixed up who said what when it retold it); 再給一句 brings the next line in the sutra's order, again with both buttons. Buttons go only under these fixed lines, never under chat replies.
+Under it, two Quick Reply buttons: 多了解這一段 sends the whole chapter as it reads, then the model's plain explanation (the passage never comes from the model, which mixed up who said what when it retold it). A chapter the bot remembers showing is not sent again, only the explanation. The question to the model carries the whole sentence a line was cut from, and asks for a short answer that keeps to the text; `node scripts/check-line-explanations.mjs` asks it about every line with the real model and fails when the median answer runs past the prompt's 220 characters. 再給一句 brings the next line in the sutra's order, again with both buttons. Buttons go only under these fixed lines, never under chat replies.
+
+"Remembers" means the turns the bot still holds word for word: this session's, and the session before until it is folded into the summary. "Read that day" means in this session, or in the session before if it ended that day. Once every line read that day is forgotten (after 清除記憶, or after enough chat that those turns are folded), a press shows the day's line again.
 
 The handler answers the postbacks `action=daily_line`, `action=daily_line_more&line=N` and `action=daily_line_next&line=N`, and the typed `@每日一句`. The menu's 每日一句 button sends `action=daily_line` and closes the menu.
 

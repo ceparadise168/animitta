@@ -210,11 +210,12 @@ export function passagesFor(userText, recentTurns = []) {
     .slice(0, MOST_CHAPTERS)
 }
 
-// 每日一句: on a Taipei day everyone gets the same line, going through the
-// sutra in order, so pressing again is never a fresh draw (that would be
-// 抽籤). Each line is the text word for word, with its chapter. Lines that read
-// as a rebuke when shown alone are left out (是人行邪道, and the two that call
-// the reader 凡夫), and so is a second line on giving in a row.
+// 每日一句: on a Taipei day everyone's first line is the same, going through
+// the sutra in order, and pressing again reads on from there, so a press is
+// never a fresh draw (that would be 抽籤). Each line is the text word for word,
+// with its chapter. Lines that read as a rebuke when shown alone are left out
+// (是人行邪道, and the two that call the reader 凡夫), and so is a second line
+// on giving in a row.
 export const DAILY_LINES = [
   ['飯食訖，收衣缽，洗足已，敷座而坐。', 1],
   ['應云何住？云何降伏其心？', 2],
@@ -255,9 +256,11 @@ export function lineAt(index) {
   return { index: at, line, chapter: CHAPTERS[chapterNumber - 1] }
 }
 
+/** The Taipei calendar day a time falls on, counted in days. */
+export const taipeiDay = (ms) => Math.floor((ms + TAIPEI_OFFSET_MS) / DAY_MS)
+
 export function todaysLine(now = Date.now()) {
-  const at = Number.isFinite(now) ? now : Date.now()
-  return lineAt(Math.floor((at + TAIPEI_OFFSET_MS) / DAY_MS))
+  return lineAt(taipeiDay(Number.isFinite(now) ? now : Date.now()))
 }
 
 // The day's line says what it is; the ones 再給一句 brings come bare.
@@ -271,16 +274,67 @@ export function todaysLineReply(now = Date.now()) {
   return lineReply(todaysLine(now), { first: true })
 }
 
+/** The daily line a reply made by lineReply shows, or null for any other reply. */
+export function lineIn(reply) {
+  const index = DAILY_LINES.findIndex(([line]) => reply.includes(`「${line}」`))
+  return index < 0 ? null : lineAt(index)
+}
+
 // 多了解這一段 first shows the whole chapter as it reads, so the passage never
 // comes from the model: asked to retell it, the model mixed up who said what
 // in 4 of 8 tries (2026-11-23). Then the model explains it. The line goes into
 // the question as a quote, so the lookup above hands the model the chapter too.
-export function passageOf({ chapter }) {
-  return `〈${chapter.title}〉原文：\n\n${chapter.text}`
+const passageHeading = ({ chapter }) => `〈${chapter.title}〉原文：`
+
+// The circulated text opens each paragraph of a long speech with 「 and closes
+// it only where the speech ends, often in a later chapter. Shown on its own, a
+// chapter closes what it leaves open.
+const closingTheSpeech = (text) => (text.match(/[「」]/g)?.at(-1) === '「' ? `${text}」` : text)
+
+export function passageOf(shown) {
+  return `${passageHeading(shown)}\n\n${closingTheSpeech(shown.chapter.text)}`
 }
 
-export function askAboutLine({ line, chapter }) {
-  return `想多了解這一句：「${line}」（${chapter.title}）。整段原文我看過了，不用重講經文內容，用白話講重點就好：這段在說什麼，這句在裡面是什麼意思？`
+/** Whether a reply the bot sent showed this line's chapter, as 多了解這一段 does. */
+export const showsPassageOf = (reply, shown) => reply.includes(passageHeading(shown))
+
+const SENTENCE_STARTS_AFTER = '。！？；「\n'
+const SENTENCE_ENDS_AT = '。！？；」\n'
+const words = (text) => (text.match(/[一-鿿]/g) || []).join('')
+
+// The whole sentence a daily line was cut from, found by its characters, since
+// a line's punctuation can differ from the chapter's. A cut line can lose what
+// it is about: 於法不說斷滅相 is said of 發阿耨多羅三藐三菩提心者, and 是法平等，
+// 無有高下 goes on 是名阿耨多羅三藐三菩提. The sentence alone does not stop the
+// model misreading: given it, the model still read 是法 as "every practice" in
+// 6 of 8 tries, where without it, as "good deeds" in 6 of 6 (2026-11-25).
+export function sentenceOf({ line, chapter }) {
+  const { text } = chapter
+  const at = [...text.matchAll(/[一-鿿]/g)].map(({ index }) => index)
+  const first = at.map((i) => text[i]).join('').indexOf(words(line))
+  let start = at[first]
+  let end = at[first + words(line).length - 1] + 1
+  while (start > 0 && !SENTENCE_STARTS_AFTER.includes(text[start - 1])) start--
+  while (end < text.length && !SENTENCE_ENDS_AT.includes(text[end])) end++
+  return text.slice(start, end)
+}
+
+// Asked only what the passage says and what the line means in it, the model
+// ran past the prompt's 220 characters on all 27 lines (median 301) and told
+// the reader what they were doing wrong (你表面在幫人，實際上在幫自己立功德).
+// Asked this way, 4 of 54 answers ran past it (median 181; 2026-11-25,
+// scripts/check-line-explanations.mjs). Told to call a reading 其中一種讀法
+// whenever unsure, it did so in 6 of 15 answers over three presses in a row,
+// hence 前面提過就不用再提.
+export function askAboutLine(shown) {
+  const { line, chapter } = shown
+  const whole = sentenceOf(shown)
+  return (
+    `想多了解這一句：「${line}」（${chapter.title}）。` +
+    (words(whole) === words(line) ? '' : `它在原文裡是一整句：「${whole}」。`) +
+    '整段原文我看過了，不用重講。用白話講就好，短一點（150 字左右）：這段在說什麼、這句在裡面指的是什麼。' +
+    '照原文本來的意思講，術語用一般的解釋；讀法不只一種的地方提一句就好，前面提過就不用再提；不用拿我舉例，也不用勸我怎麼做。'
+  )
 }
 
 export function passageNote(passages) {

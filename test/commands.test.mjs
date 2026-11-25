@@ -11,8 +11,10 @@ process.env.LLM_PROVIDER = 'anthropic'
 process.env.BEDROCK_MODEL_ID = 'jp.anthropic.claude-haiku-4-5-20251001-v1:0'
 
 const mockClearMemory = jest.fn()
+const mockGetContext = jest.fn()
 jest.unstable_mockModule('../lambda/services/memory.mjs', () => ({
   clearMemory: mockClearMemory,
+  getContext: mockGetContext,
   RETENTION_DAYS: 45,
 }))
 
@@ -26,7 +28,15 @@ jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({
 jest.unstable_mockModule('../lambda/services/voice.mjs', () => ({ VOICE_MINUTES_PER_MONTH: 25 }))
 
 const { handleCommand, handlePostback, isCommand } = await import('../lambda/commands.mjs')
-const { DAILY_LINES, todaysLine } = await import('../lambda/sutra.mjs')
+const { DAILY_LINES, lineAt, lineReply, todaysLine } = await import('../lambda/sutra.mjs')
+
+const remembering = (recentTurns, previousSession = null) => ({ summary: null, recentTurns, previousSession })
+// The turns the bot remembers from these calls, as the handlers made them.
+const turnsOf = (...calls) =>
+  calls.flatMap(([, , userSide, reply]) => [
+    { role: 'user', content: userSide },
+    { role: 'assistant', content: reply },
+  ])
 
 describe('commands', () => {
   beforeEach(() => {
@@ -34,6 +44,7 @@ describe('commands', () => {
     mockReplyMessage.mockResolvedValue(undefined)
     mockReplyWithQuickReply.mockResolvedValue(undefined)
     mockClearMemory.mockResolvedValue(undefined)
+    mockGetContext.mockResolvedValue(remembering([]))
     mockReplyAndRemember.mockResolvedValue(undefined)
     mockHandleText.mockResolvedValue(undefined)
   })
@@ -165,6 +176,34 @@ describe('commands', () => {
       expect(mockReplyAndRemember).not.toHaveBeenCalled()
     })
 
+    it('多了解這一段 leaves out a chapter it already showed, and still asks about the line', async () => {
+      await handlePostback('user1', 'token1', 'action=daily_line_more&line=19', MORNING)
+      const [, , asked, , { before }] = mockHandleText.mock.calls[0]
+      mockGetContext.mockResolvedValue(
+        remembering([
+          { role: 'user', content: asked },
+          { role: 'assistant', content: `${before}\n\n（模型的解釋）` },
+        ]),
+      )
+
+      await handlePostback('user1', 'token1', 'action=daily_line_more&line=20', MORNING)
+      await handlePostback('user1', 'token1', 'action=daily_line_more&line=18', MORNING)
+
+      const [sameChapter, otherChapter] = mockHandleText.mock.calls.slice(1)
+      expect(sameChapter[2]).toContain(`「${DAILY_LINES[20][0]}」`)
+      expect(sameChapter[4]).toEqual({})
+      expect(otherChapter[4].before).toMatch(/^〈非說所說分第二十一〉原文：/)
+    })
+
+    it('多了解這一段 still shows the chapter when memory cannot be read, and leaves the failure to the answer', async () => {
+      mockGetContext.mockRejectedValue(Object.assign(new Error('Rate exceeded'), { name: 'ProvisionedThroughputExceededException' }))
+      jest.spyOn(console, 'warn').mockImplementation(() => {})
+
+      await handlePostback('user1', 'token1', 'action=daily_line_more&line=19', MORNING)
+
+      expect(mockHandleText.mock.calls[0][4].before).toMatch(/^〈淨心行善分第二十三〉原文：/)
+    })
+
     it.each(['action=daily_line_next&line=abc', 'action=daily_line_next&line=999', 'action=daily_line_next'])(
       'goes on from today\'s line when it cannot tell which line the button was under (%s)',
       async (data) => {
@@ -174,6 +213,128 @@ describe('commands', () => {
         expect(mockReplyAndRemember.mock.calls[0][3]).toContain(`「${next}」`)
       },
     )
+  })
+
+  describe('每日一句 pressed again', () => {
+    const NIGHT = Date.parse('2026-11-25T22:11:00+08:00')
+    const today = todaysLine(NIGHT)
+    const press = async (data, sentAt = NIGHT) => {
+      await handlePostback('user1', 'token1', data, sentAt)
+      return mockReplyAndRemember.mock.calls.at(-1)
+    }
+
+    it("reads on from today's line instead of showing it again", async () => {
+      const first = await press('action=daily_line')
+      mockGetContext.mockResolvedValue(remembering(turnsOf(first)))
+
+      const again = await press('action=daily_line')
+
+      expect(first[3]).toBe(lineReply(today, { first: true }))
+      expect(again[2]).toBe('（按了選單的「每日一句」）')
+      expect(again[3]).toBe(lineReply(lineAt(today.index + 1)))
+      expect(again[5].quickReply.map((b) => b.data)).toEqual([
+        `action=daily_line_more&line=${today.index + 1}`,
+        `action=daily_line_next&line=${today.index + 1}`,
+      ])
+    })
+
+    it('reads on from the last line shown, after 再給一句 and 多了解這一段', async () => {
+      const first = await press('action=daily_line')
+      mockGetContext.mockResolvedValue(remembering(turnsOf(first)))
+      const next = await press(`action=daily_line_next&line=${today.index}`)
+      const explained = [
+        { role: 'user', content: '想多了解這一句：…' },
+        { role: 'assistant', content: '（模型的解釋）' },
+      ]
+      mockGetContext.mockResolvedValue(remembering([...turnsOf(first, next), ...explained]))
+
+      const again = await press('action=daily_line')
+
+      expect(again[3]).toBe(lineReply(lineAt(today.index + 2)))
+    })
+
+    const HOUR = 3_600_000
+    const sessionEnded = (endedAt, ...calls) => ({
+      turns: turnsOf(...calls),
+      idleMs: NIGHT - endedAt,
+      endsAt: new Date(endedAt).toISOString(),
+    })
+
+    it("reads on after a break, from a session before that ended today", async () => {
+      const first = await press('action=daily_line', NIGHT - 3 * HOUR)
+      mockGetContext.mockResolvedValue(remembering([], sessionEnded(NIGHT - 3 * HOUR, first)))
+
+      const again = await press('action=daily_line')
+
+      expect(again[3]).toBe(lineReply(lineAt(today.index + 1)))
+    })
+
+    // The first reply after a break folds the session before, today's line
+    // with it, into the summary (2026-11-25 review: presses went 20, 19, 20).
+    it("keeps going forward once today's line is folded away", async () => {
+      const first = await press('action=daily_line', NIGHT - 3 * HOUR)
+      mockGetContext.mockResolvedValue(remembering([], sessionEnded(NIGHT - 3 * HOUR, first)))
+      const afterBreak = await press('action=daily_line')
+      mockGetContext.mockResolvedValue(remembering(turnsOf(afterBreak)))
+
+      const again = await press('action=daily_line')
+
+      expect(again[3]).toBe(lineReply(lineAt(today.index + 2)))
+    })
+
+    it('never brings back a line still remembered, even one an old 再給一句 showed', async () => {
+      const first = await press('action=daily_line')
+      mockGetContext.mockResolvedValue(remembering(turnsOf(first)))
+      const old = await press(`action=daily_line_next&line=${today.index - 2}`)
+      mockGetContext.mockResolvedValue(remembering(turnsOf(first, old)))
+
+      const again = await press('action=daily_line')
+
+      expect(old[3]).toBe(lineReply(lineAt(today.index - 1)))
+      expect(again[3]).toBe(lineReply(lineAt(today.index + 1)))
+    })
+
+    it("starts a new day with that day's line, after the day before's reading", async () => {
+      const yesterday = await press('action=daily_line', NIGHT - 24 * HOUR)
+      mockGetContext.mockResolvedValue(remembering([], sessionEnded(NIGHT - 24 * HOUR, yesterday)))
+
+      const tonight = await press('action=daily_line')
+
+      expect(tonight[3]).toBe(lineReply(today, { first: true }))
+    })
+
+    it("skips today's line when it was read ahead the day before", async () => {
+      const yesterday = await press('action=daily_line', NIGHT - 24 * HOUR)
+      mockGetContext.mockResolvedValue(remembering(turnsOf(yesterday)))
+      const ahead = await press(`action=daily_line_next&line=${today.index - 1}`, NIGHT - 24 * HOUR)
+      mockGetContext.mockResolvedValue(remembering([], sessionEnded(NIGHT - 24 * HOUR, yesterday, ahead)))
+
+      const tonight = await press('action=daily_line')
+
+      expect(ahead[3]).toBe(lineReply(today))
+      expect(tonight[3]).toBe(lineReply(lineAt(today.index + 1)))
+    })
+
+    it('starts at the day\'s line after weeks away, not where the reading stopped then', async () => {
+      const longAgo = NIGHT - 15 * 24 * HOUR
+      const then = await press('action=daily_line', longAgo)
+      mockGetContext.mockResolvedValue(remembering(turnsOf(then)))
+      const next = await press(`action=daily_line_next&line=${todaysLine(longAgo).index}`, longAgo)
+      mockGetContext.mockResolvedValue(remembering([], sessionEnded(longAgo, then, next)))
+
+      const tonight = await press('action=daily_line')
+
+      expect(tonight[3]).toBe(lineReply(today, { first: true }))
+    })
+
+    it("still shows the day's line when memory cannot be read", async () => {
+      mockGetContext.mockRejectedValue(Object.assign(new Error('Rate exceeded'), { name: 'ProvisionedThroughputExceededException' }))
+      jest.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const line = await press('action=daily_line')
+
+      expect(line[3]).toBe(lineReply(today, { first: true }))
+    })
   })
 
   it('recognises only the exact menu texts as commands', () => {

@@ -30,7 +30,7 @@ global.fetch = async (url, init) => {
     const { replyToken, messages } = JSON.parse(init.body)
     if (usedReplyTokens.has(replyToken)) return { ok: false, status: 400, json: async () => ({ message: 'Invalid reply token' }) }
     usedReplyTokens.add(replyToken)
-    lineReplies.push(messages[0].text)
+    lineReplies.push(...messages.map((m) => m.text))
     return ok({})
   }
   if (String(url).startsWith('https://api.line.me/')) return ok({})
@@ -52,6 +52,7 @@ global.fetch = async (url, init) => {
 
 const { handler } = await import('../lambda/index.mjs')
 const memory = await import('../lambda/services/memory.mjs')
+const { lineAt, lineIn, lineReply, todaysLine } = await import('../lambda/sutra.mjs')
 
 const USER = 'U-memory'
 const PK = `USER#${USER}`
@@ -177,6 +178,43 @@ describe('conversation memory, end to end', () => {
   })
 
   describe('what the bot said without the model', () => {
+    const press = (data) => send({ type: 'postback', postback: { data } })
+
+    it('reads on when 每日一句 is pressed again, instead of showing the same line', async () => {
+      await press('action=daily_line')
+      await press('action=daily_line')
+
+      const first = lineIn(lineReplies[0])
+      expect(lineReplies).toEqual([lineReply(first, { first: true }), lineReply(lineAt(first.index + 1))])
+    })
+
+    // The first reply after a break folds the session before into the summary,
+    // today's line with it; the presses after that must still go forward.
+    it('keeps reading forward after a break, press after press', async () => {
+      const today = todaysLine(lineClock + 1000)
+      putTurn(180, '（按了選單的「每日一句」）', lineReply(today, { first: true }))
+
+      await press('action=daily_line')
+      await press('action=daily_line')
+      await press('action=daily_line')
+
+      expect(lineReplies).toEqual([1, 2, 3].map((ahead) => lineReply(lineAt(today.index + ahead))))
+    })
+
+    it('shows a chapter once: 多了解這一段 under the next line of it sends the explanation alone', async () => {
+      await press('action=daily_line_more&line=19')
+      await press('action=daily_line_next&line=19')
+      await press('action=daily_line_more&line=20')
+
+      expect(lineReplies).toEqual([
+        expect.stringMatching(/^〈淨心行善分第二十三〉原文：\n\n「復次，須菩提！是法平等/),
+        '（模型的回覆）',
+        lineReply(lineAt(20)),
+        '（模型的回覆）',
+      ])
+      expect(everythingSent(chatRequests[1])).toContain('所言善法者，如來說即非善法，是名善法。')
+    })
+
     it('remembers the casual-chat opener the user is answering', async () => {
       await send({ type: 'postback', postback: { data: 'action=casual_chat' } })
       const opener = lineReplies[0]
