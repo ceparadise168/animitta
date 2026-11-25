@@ -56,6 +56,58 @@ describe('chat service', () => {
       expect(mockCompressOldTurns).toHaveBeenCalledWith('user1', mockProvider)
     })
 
+    // Replies the model wrote for made-up conversations (2026-11-25), and what the person should get.
+    describe('a closing question that offers two choices', () => {
+      const sentFor = async (modelText, userText = '最近跟身邊的人都有點疏遠') => {
+        mockProvider.chatCompletion.mockResolvedValue({ text: modelText })
+        await handleText('user1', 'token1', userText, 1795270000000)
+        return mockReplyMessage.mock.calls.at(-1)[1]
+      }
+
+      it.each([
+        ['疏遠是什麼感覺啦\n\n是他們變了，還是你發現自己講不出話了；或是根本沒特別原因，就是有點卡著', '疏遠是什麼感覺啦'],
+        ['嗯，提不起勁。\n\n這個狀態有多久了？是最近幾週，還是已經一段時間？', '嗯，提不起勁。\n\n這個狀態有多久了？'],
+        ['哈那就難熬了\n\n窗戶看得到外面嗎，還是被困在裡面', '哈那就難熬了'],
+        ['嗯\n\n那個卡的感覺，是什麼時候開始的？還是說，它一直都在，只是最近特別明顯？', '嗯\n\n那個卡的感覺，是什麼時候開始的？'],
+        ['累爆喔\n\n這種加班累，是身體累還是心裡更累啦', '累爆喔'],
+        ['冷氣壞掉真的會要命\n\n馬上找人來修嗎，還是得先撐一陣子', '冷氣壞掉真的會要命'],
+        ['嗯，那個循環感\n\n你會這樣問，是今天特別悶？還是說最近發生了什麼事？', '嗯，那個循環感\n\n你會這樣問，是今天特別悶？'],
+      ])('is left off: %j', async (written, sent) => {
+        expect(await sentFor(written)).toBe(sent)
+      })
+
+      it('is left out of what the bot remembers saying, too', async () => {
+        await sentFor('哈那就難熬了\n\n窗戶看得到外面嗎，還是被困在裡面', '哈哈對啊')
+
+        expect(mockSaveTurn).toHaveBeenCalledWith('user1', '哈哈對啊', '哈那就難熬了', 1795270000000)
+      })
+
+      it.each([
+        ['handing the direction back', '現在先不急著怎麼解開它。你想講講，這個「卡」具體長什麼樣子嗎？還是先停在這裡也可以。'],
+        ['還是 as "still"', '嗯\n\n那就更孤獨一點了。試過了，還是講不通'],
+        ['還是 as "still", after the person', '像你可以全力去做一件事，同時心裡知道「結果會怎樣，我還是我」'],
+        ['a reply that is nothing else', '是他們變了，還是你變了'],
+        ['a choice that is not the closing sentence', '是工作的事，還是家裡的事，你剛剛沒說\n\n不過不急，慢慢講'],
+        ['an open question', '嗯，那種感覺滿難受的\n\n這樣多久了'],
+        ['還是 as "had better"', '累成這樣\n\n今天還是先休息吧'],
+        ['還是 as "had better", opening the sentence', '嗯\n\n還是早點睡比較好'],
+        ['a question that asks if something is still so', '嗯\n\n事情還是沒解決嗎？'],
+        ['還是 as "still" after a pause', '嗯\n\n想了很久，還是覺得是我的錯'],
+        ['還是 as "still" after 是', '她會念你很正常\n\n那個人是你媽，還是會擔心的'],
+        ['a choice with nothing that marks a question', '哈哈\n\n真的想去，還是就想想而已'],
+      ])('stays for %s', async (_, written) => {
+        expect(await sentFor(written)).toBe(written)
+      })
+
+      it.each([
+        ['考試考爛了 我想死啦 哈哈', '我看到你說「想死」。你現在是真的有點想不開，還是單純在罵自己考得爛？'],
+        ['有時候會想，如果我消失了大家會不會比較輕鬆', '聽起來這個念頭在你心裡盤旋了一陣子。\n\n真的是這樣嗎，還是有什麼具體的事讓你這樣想？'],
+        ['就是提不起勁', '嗯，提不起勁\n\n你說的累，是身體累，還是有時候會覺得不想活了？'],
+      ])('stays when the talk is near a crisis: %s', async (userText, written) => {
+        expect(await sentFor(written, userText)).toBe(written)
+      })
+    })
+
     it('gives the model until 55 seconds after the user sent the message, while LINE can still take the reply', async () => {
       mockProvider.chatCompletion.mockResolvedValue({ text: '嗯' })
 
