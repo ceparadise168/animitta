@@ -144,7 +144,7 @@ function explainProvider(cause) {
 
 const OPS = {
   chat: { during: '', slow: '超過 20 秒沒回', seen: '使用者收到道歉。' },
-  summary: { during: '整理記憶時', slow: '整理記憶時太久沒回', seen: '使用者有收到回覆，只是記憶整理沒做完，下一則訊息會再試。' },
+  summary: { during: '整理記憶時', slow: '整理記憶時太久沒回', seen: '使用者有收到回覆，只是記憶整理沒做完，之後的訊息會再試。' },
 }
 
 function explainPrimary({ service, op, status, type, backup }) {
