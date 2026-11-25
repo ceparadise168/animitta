@@ -6,6 +6,10 @@ import 'dotenv/config'
 import { AnthropicProvider } from '../lambda/providers/anthropic.mjs'
 
 const RUNS = Number(process.argv[2] || 5)
+if (!Number.isInteger(RUNS) || RUNS < 1) {
+  console.error(`runs per scenario must be a whole number of at least 1, not ${process.argv[2]}`)
+  process.exit(2)
+}
 
 const summary =
   '使用者是一名軟體工程師，常提到工作壓力與加班，主管下班後仍會交辦事情，使用者很難拒絕。最近睡不好，半夜常醒。' +
