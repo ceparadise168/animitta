@@ -91,6 +91,23 @@ describe('chat service', () => {
       expect(order).toEqual(['reply', 'replied', 'save'])
     })
 
+    it('writes summaries only after the reply reached LINE, as the alert email tells Eric', async () => {
+      mockProvider.chatCompletion.mockResolvedValue({ text: '嗯' })
+      mockGetContext.mockResolvedValueOnce({
+        summary: null,
+        recentTurns: [],
+        previousSession: { turns: [{ role: 'user', content: '昨天好累' }], idleMs: 3 * 3_600_000, endsAt: '2026-11-25T08:00:00.000Z' },
+      })
+      const order = []
+      mockReplyMessage.mockImplementation(async () => order.push('reply'))
+      mockArchiveSession.mockImplementationOnce(async () => order.push('archive'))
+      mockCompressOldTurns.mockImplementation(async () => order.push('compress'))
+
+      await handleText('user1', 'token1', '我好累', Date.now())
+
+      expect(order).toEqual(['reply', 'archive', 'compress'])
+    })
+
     it('does not say the reply reached LINE when sending it failed', async () => {
       mockProvider.chatCompletion.mockResolvedValue({ text: '嗯' })
       mockReplyMessage.mockRejectedValue(new Error('LINE reply failed: 400'))
@@ -164,6 +181,16 @@ describe('chat service', () => {
 
       expect(mockReplyMessage).toHaveBeenCalledWith('token1', '嗨')
       expect(mockReplyWithQuickReply).not.toHaveBeenCalled()
+    })
+
+    it('writes summaries only after the reply reached LINE', async () => {
+      const order = []
+      mockReplyMessage.mockImplementation(async () => order.push('reply'))
+      mockCompressOldTurns.mockImplementation(async () => order.push('compress'))
+
+      await replyAndRemember('user1', 'token1', '（按了選單的「隨意聊聊」）', '嗨', 1795270000000)
+
+      expect(order).toEqual(['reply', 'compress'])
     })
   })
 })
