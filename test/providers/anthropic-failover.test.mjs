@@ -265,6 +265,74 @@ describe('AnthropicProvider when Anthropic fails', () => {
   })
 })
 
+describe('AnthropicProvider with no backup', () => {
+  const hangs = (url, { signal }) => new Promise((_, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason))
+  })
+  const answersAfter = (ms, text) => (url, { signal }) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(ok(text)), ms)
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer)
+      reject(signal.reason)
+    })
+  })
+
+  beforeEach(() => mockFetch.mockReset())
+
+  it('waits past the per-try limit for a slow summary, inside its budget', async () => {
+    mockFetch.mockImplementationOnce(answersAfter(80, '摘要'))
+    const provider = new AnthropicProvider({ backup: null, retryPauseMs: 0, summaryAttemptMs: 20 })
+
+    await expect(provider.summarize(null, [{ role: 'user', content: '最近很累' }])).resolves.toBe('摘要')
+  })
+
+  it('waits past the per-try limit for a slow chat, until the caller\'s deadline', async () => {
+    mockFetch.mockImplementationOnce(answersAfter(80, '回覆'))
+    const provider = new AnthropicProvider({ backup: null, retryPauseMs: 0, chatAttemptMs: 20 })
+
+    const answer = provider.chatCompletion(ask, { signal: AbortSignal.timeout(2_000), deadline: Date.now() + 2_000 })
+
+    await expect(answer).resolves.toEqual({ text: '回覆' })
+  })
+
+  it('names a summary that outlasts its whole budget as no response, which the alert reads', async () => {
+    mockFetch.mockImplementation(hangs)
+    const provider = new AnthropicProvider({ backup: null, retryPauseMs: 0, summaryBudgetMs: 30 })
+
+    const err = await provider.summarize(null, [{ role: 'user', content: '最近很累' }]).catch((e) => e)
+
+    expect(err).toBeInstanceOf(Error)
+    expect(err.message).toBe('Anthropic summary failed: no response')
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  }, 1_000)
+
+  it('stops a chat at the caller\'s deadline with the caller\'s own error', async () => {
+    mockFetch.mockImplementation(hangs)
+    const provider = new AnthropicProvider({ backup: null, retryPauseMs: 0 })
+
+    const err = await provider.chatCompletion(ask, { signal: AbortSignal.timeout(30), deadline: Date.now() + 30 }).catch((e) => e)
+
+    expect(err.name).toBe('TimeoutError')
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('still asks once more after a fast overload', async () => {
+    mockFetch.mockResolvedValueOnce(failed(529, 'overloaded_error')).mockResolvedValueOnce(ok('回覆'))
+    const provider = new AnthropicProvider({ backup: null, retryPauseMs: 0 })
+
+    await expect(provider.chatCompletion(ask, { signal: AbortSignal.timeout(2_000), deadline: Date.now() + 2_000 })).resolves.toEqual({ text: '回覆' })
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('still asks once more after a fast overload on a summary', async () => {
+    mockFetch.mockResolvedValueOnce(failed(529, 'overloaded_error')).mockResolvedValueOnce(ok('摘要'))
+    const provider = new AnthropicProvider({ backup: null, retryPauseMs: 0 })
+
+    await expect(provider.summarize(null, [{ role: 'user', content: '最近很累' }])).resolves.toBe('摘要')
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('BedrockBackup', () => {
   it('sends the same request with the version Bedrock asks for, and reads the reply back', async () => {
     const client = { send: jest.fn().mockResolvedValueOnce({ body: new TextEncoder().encode(JSON.stringify(reply('備援'))) }) }
