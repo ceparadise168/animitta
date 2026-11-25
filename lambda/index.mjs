@@ -54,12 +54,44 @@ export async function handler(event) {
   return { statusCode: 200, body: 'OK' }
 }
 
+// How a message came in: a button pressed (the menu, or one under a message),
+// or something said in the person's own words (typed, spoken or a sticker).
+// A photo or a file is neither, and a new follower has sent nothing yet. An
+// event it cannot read counts as nothing, so counting never costs a reply.
+function howTheyCameIn({ type, message }) {
+  if (type === 'postback') return 'PressedAButton'
+  if (type !== 'message') return null
+  if (message?.type === 'text') return isCommand(message.text) ? 'PressedAButton' : 'SaidInOwnWords'
+  return ['sticker', 'audio'].includes(message?.type) ? 'SaidInOwnWords' : null
+}
+
+// Counted so the maintainer can see how the bot is used without reading any
+// conversation: only how the message came in, never who sent it, what it said
+// or which button it was. One line in CloudWatch's embedded metric format
+// becomes the Animitta metrics PressedAButton and SaidInOwnWords. It goes
+// straight to stdout because the format takes a line of pure JSON, and
+// console.log would put a timestamp before it. LINE sends a webhook again when
+// a try got no answer, so a retried message is counted twice.
+function countHowTheyCameIn(lineEvent) {
+  const metric = howTheyCameIn(lineEvent)
+  if (!metric) return
+  const counted = {
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [{ Namespace: 'Animitta', Dimensions: [[]], Metrics: [{ Name: metric, Unit: 'Count' }] }],
+    },
+    [metric]: 1,
+  }
+  process.stdout.write(`${JSON.stringify(counted)}\n`)
+}
+
 async function handleEvent(lineEvent) {
   // 無相界 talks one to one. Group and room events would all share one memory,
   // and channel events (activation, for one) carry no source at all.
   if (lineEvent.source?.type !== 'user' || !lineEvent.source.userId) return
   const { replyToken, timestamp: sentAt } = lineEvent
   const userId = lineEvent.source.userId
+  countHowTheyCameIn(lineEvent)
 
   try {
     if (lineEvent.type === 'follow') {

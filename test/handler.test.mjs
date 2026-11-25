@@ -53,6 +53,90 @@ describe('Lambda handler', () => {
     }
   }
 
+  // Every line the handler wrote to stdout while it handled these events.
+  async function stdoutWhileHandling(events, source = { type: 'user', userId: 'U-who-it-was' }) {
+    const write = jest.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    try {
+      const body = { events: events.map((event) => ({ replyToken: 'tok', timestamp: SENT_AT, source, ...event })) }
+      await handler(makeEvent(body))
+      return write.mock.calls.map(([line]) => String(line))
+    } finally {
+      write.mockRestore()
+    }
+  }
+  const countedIn = (lines) => lines.map((line) => JSON.parse(line)).flatMap((counted) => counted._aws.CloudWatchMetrics[0].Metrics.map(({ Name }) => Name))
+
+  it('counts how each message came in: a button pressed, or the person\'s own words', async () => {
+    const lines = await stdoutWhileHandling([
+      { type: 'postback', postback: { data: 'action=daily_line' } },
+      { type: 'message', message: { type: 'text', text: '@隨意聊聊' } },
+      { type: 'message', message: { type: 'text', text: '今天好累' } },
+      { type: 'message', message: { type: 'sticker', keywords: ['tired'] } },
+      { type: 'message', message: { type: 'audio', id: 'a1', duration: 3000, contentProvider: { type: 'line' } } },
+    ])
+
+    expect(countedIn(lines)).toEqual(['PressedAButton', 'PressedAButton', 'SaidInOwnWords', 'SaidInOwnWords', 'SaidInOwnWords'])
+  })
+
+  it('writes each count as one line of pure JSON in CloudWatch\'s metric format, with no dimensions', async () => {
+    const [line, ...others] = await stdoutWhileHandling([{ type: 'message', message: { type: 'text', text: '今天好累' } }])
+
+    expect(others).toEqual([])
+    expect(line.endsWith('\n')).toBe(true)
+    expect(line.trimEnd()).not.toContain('\n')
+    const counted = JSON.parse(line)
+    expect(counted).toEqual({
+      _aws: {
+        Timestamp: expect.any(Number),
+        CloudWatchMetrics: [{ Namespace: 'Animitta', Dimensions: [[]], Metrics: [{ Name: 'SaidInOwnWords', Unit: 'Count' }] }],
+      },
+      SaidInOwnWords: 1,
+    })
+  })
+
+  it('counts without writing who it was, what they said or which button they pressed', async () => {
+    const lines = await stdoutWhileHandling([
+      { type: 'postback', postback: { data: 'action=daily_line_more&line=7' } },
+      { type: 'message', message: { type: 'text', text: '我弟又跟我借錢了' } },
+      { type: 'message', message: { type: 'sticker', keywords: ['crying'], text: '好想哭' } },
+    ])
+
+    expect(lines).toHaveLength(3)
+    for (const said of ['U-who-it-was', '我弟', '借錢', 'daily_line', 'line=7', 'crying', '好想哭', 'tok']) {
+      expect(lines.join('')).not.toContain(said)
+    }
+  })
+
+  it('counts nothing for a new follower, a photo or a file, which are neither a button nor words', async () => {
+    const lines = await stdoutWhileHandling([
+      { type: 'follow' },
+      { type: 'unfollow' },
+      { type: 'message', message: { type: 'image', id: 'i1' } },
+      { type: 'message', message: { type: 'file', id: 'f1' } },
+    ])
+
+    expect(lines).toEqual([])
+  })
+
+  it('counts nothing for a message event it cannot read, and still apologises for it as before', async () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {})
+    mockReplyMessage.mockResolvedValue(undefined)
+    try {
+      expect(await stdoutWhileHandling([{ type: 'message' }])).toEqual([])
+      expect(mockReplyMessage).toHaveBeenCalledWith('tok', expect.stringContaining('暫時卡住了'))
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it('counts nothing in a group chat or for a request that fails the signature, which are not answered either', async () => {
+    const press = { type: 'postback', postback: { data: 'action=daily_line' } }
+    expect(await stdoutWhileHandling([press], { type: 'group', groupId: 'g1', userId: 'u1' })).toEqual([])
+
+    mockVerifySignature.mockReturnValue(false)
+    expect(await stdoutWhileHandling([press])).toEqual([])
+  })
+
   it('returns 200 for valid text message', async () => {
     const body = {
       events: [
