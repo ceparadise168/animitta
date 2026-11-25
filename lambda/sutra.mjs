@@ -296,8 +296,43 @@ export function passageOf(shown) {
 /** Whether a reply the bot sent showed this line's chapter, as 多了解這一段 does. */
 export const showsPassageOf = (reply, shown) => reply.includes(passageHeading(shown))
 
-export function askAboutLine({ line, chapter }) {
-  return `想多了解這一句：「${line}」（${chapter.title}）。整段原文我看過了，不用重講經文內容，用白話講重點就好：這段在說什麼，這句在裡面是什麼意思？`
+const SENTENCE_STARTS_AFTER = '。！？；「\n'
+const SENTENCE_ENDS_AT = '。！？；」\n'
+const words = (text) => (text.match(/[一-鿿]/g) || []).join('')
+
+// The whole sentence a daily line was cut from, found by its characters, since
+// a line's punctuation can differ from the chapter's. A cut line can lose what
+// it is about: 於法不說斷滅相 is said of 發阿耨多羅三藐三菩提心者, and 是法平等，
+// 無有高下 goes on 是名阿耨多羅三藐三菩提. The sentence alone does not stop the
+// model misreading: given it, the model still read 是法 as "every practice" in
+// 6 of 8 tries, where without it, as "good deeds" in 6 of 6 (2026-11-25).
+export function sentenceOf({ line, chapter }) {
+  const { text } = chapter
+  const at = [...text.matchAll(/[一-鿿]/g)].map(({ index }) => index)
+  const first = at.map((i) => text[i]).join('').indexOf(words(line))
+  let start = at[first]
+  let end = at[first + words(line).length - 1] + 1
+  while (start > 0 && !SENTENCE_STARTS_AFTER.includes(text[start - 1])) start--
+  while (end < text.length && !SENTENCE_ENDS_AT.includes(text[end])) end++
+  return text.slice(start, end)
+}
+
+// Asked only what the passage says and what the line means in it, the model
+// ran past the prompt's 220 characters on all 27 lines (median 301) and told
+// the reader what they were doing wrong (你表面在幫人，實際上在幫自己立功德).
+// Asked this way, 4 of 54 answers ran past it (median 181; 2026-11-25,
+// scripts/check-line-explanations.mjs). Told to call a reading 其中一種讀法
+// whenever unsure, it did so in 6 of 15 answers over three presses in a row,
+// hence 前面提過就不用再提.
+export function askAboutLine(shown) {
+  const { line, chapter } = shown
+  const whole = sentenceOf(shown)
+  return (
+    `想多了解這一句：「${line}」（${chapter.title}）。` +
+    (words(whole) === words(line) ? '' : `它在原文裡是一整句：「${whole}」。`) +
+    '整段原文我看過了，不用重講。用白話講就好，短一點（150 字左右）：這段在說什麼、這句在裡面指的是什麼。' +
+    '照原文本來的意思講，術語用一般的解釋；讀法不只一種的地方提一句就好，前面提過就不用再提；不用拿我舉例，也不用勸我怎麼做。'
+  )
 }
 
 export function passageNote(passages) {

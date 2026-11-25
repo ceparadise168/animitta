@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals'
-import { passagesFor, passageNote, DAILY_LINES, todaysLine, todaysLineReply, lineAt, lineIn, lineReply, askAboutLine, passageOf } from '../lambda/sutra.mjs'
+import { passagesFor, passageNote, DAILY_LINES, todaysLine, todaysLineReply, lineAt, lineIn, lineReply, askAboutLine, passageOf, sentenceOf } from '../lambda/sutra.mjs'
 import { buildMessages } from '../lambda/prompt.mjs'
 import { EVERYDAY_MESSAGES } from './fixtures/everyday-messages.mjs'
 
@@ -200,6 +200,25 @@ describe('the lines after the day\'s one', () => {
     expect(lineIn(lineReply(lineAt(19), { first: true })).index).toBe(19)
     expect(lineIn(lineReply(lineAt(20))).index).toBe(20)
     expect(lineIn('是法平等，無有高下，這句我也很喜歡')).toBe(null)
+  })
+})
+
+describe('asking about a line', () => {
+  it('gives the whole sentence the line was cut from, which says what 是法 is', () => {
+    expect(sentenceOf(lineAt(19))).toBe('是法平等，無有高下，是名阿耨多羅三藐三菩提')
+    expect(askAboutLine(lineAt(19))).toContain('它在原文裡是一整句：「是法平等，無有高下，是名阿耨多羅三藐三菩提」。')
+  })
+
+  it('says nothing more for a line that is a whole sentence already', () => {
+    expect(sentenceOf(lineAt(16))).toBe('過去心不可得，現在心不可得，未來心不可得')
+    expect(askAboutLine(lineAt(16))).not.toContain('一整句')
+  })
+
+  it.each(DAILY_LINES.map((_, i) => [i]))('finds the sentence of line %d inside its chapter', (i) => {
+    const shown = lineAt(i)
+    const words = (text) => text.replace(/[^一-鿿]/g, '')
+    expect(shown.chapter.text).toContain(sentenceOf(shown))
+    expect(words(sentenceOf(shown))).toContain(words(shown.line))
   })
 })
 
