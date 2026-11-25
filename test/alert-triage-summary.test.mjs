@@ -1,9 +1,16 @@
 import { describe, it, expect } from '@jest/globals'
 import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { causeOf, summarize, needsClaude, explain, BOT_FILES } from '../ops/alert-triage/summary.mjs'
+import { causeOf, signatureOf, summarize, needsClaude, explain, BOT_FILES } from '../ops/alert-triage/summary.mjs'
 
 const at = (minute) => Date.UTC(2026, 10, 24, 8, minute)
+
+const summaryNoResponse =
+  'Handler error: Error: Anthropic summary failed: no response\n' +
+  '    at AnthropicProvider.#send (file:///var/task/providers/anthropic.mjs:85:46)\n' +
+  '    at async foldIntoSummary (file:///var/task/services/memory.mjs:160:19)\n' +
+  '    at async compressOldTurns (file:///var/task/services/memory.mjs:212:5) {\n' +
+  '  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout'
 
 describe('alert triage summary', () => {
   it('keeps nothing a person typed, nor text written to steer Claude', () => {
@@ -47,6 +54,7 @@ describe('alert triage summary', () => {
     expect(causeOf('Handler error: Error: Anthropic chat failed: 529 overloaded_error; backup: Bedrock chat failed: 403 AccessDeniedException')).toEqual({
       kind: 'provider',
       service: 'Anthropic',
+      op: 'chat',
       status: '529',
       type: 'overloaded_error',
       backup: '403 AccessDeniedException',
@@ -106,5 +114,38 @@ describe('alert triage summary', () => {
 
     expect(step.action).toContain('Bedrock 備援沒開通')
     expect(step.phone).toBe(false)
+  })
+
+  it('says the user got a reply when only the memory summary after it failed', () => {
+    const cause = causeOf(summaryNoResponse)
+    const step = explain(cause)
+
+    expect(cause).toMatchObject({ kind: 'provider', service: 'Anthropic', op: 'summary', status: 'no response' })
+    expect(step.users).toBe('使用者有收到回覆，只是記憶整理沒做完，下一則訊息會再試。')
+    expect(step.what).toBe('Anthropic 整理記憶時失敗（no response）：服務暫時塞車或故障。')
+  })
+
+  it('keeps the apology for a chat that got no response', () => {
+    expect(explain(causeOf('Handler error: Error: Anthropic chat failed: no response')).users).toBe('使用者收到道歉。')
+  })
+
+  it('counts a summary failure apart from a chat failure with the same status', () => {
+    expect(signatureOf(causeOf(summaryNoResponse))).toBe('provider:Anthropic:summary:no response')
+    expect(signatureOf(causeOf('Handler error: Error: Anthropic chat failed: no response'))).toBe('provider:Anthropic:chat:no response')
+  })
+
+  it('says the user got a reply for every way a summary can fail', () => {
+    for (const line of [
+      'Anthropic summary failed: 401 authentication_error',
+      'Anthropic summary failed: 400 billing_error',
+      'Anthropic summary failed: 429 rate_limit_error',
+      'Anthropic summary failed: 529 overloaded_error; backup: Bedrock summary failed: 403 AccessDeniedException',
+      'The operation was aborted due to timeout; backup: Bedrock summary failed: 503 ServiceUnavailableException',
+      'Anthropic summary failed: unreadable reply',
+    ]) {
+      const step = explain(causeOf(line))
+      expect(step.users).toBe('使用者有收到回覆，只是記憶整理沒做完，下一則訊息會再試。')
+      expect(step.what).not.toMatch(/\d+ 秒/)
+    }
   })
 })
