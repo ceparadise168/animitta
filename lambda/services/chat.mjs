@@ -7,6 +7,38 @@ function stripMarkdown(text) {
   return text.replace(/[*#_~`>]/g, '')
 }
 
+// Haiku 4.5 closes about four replies in ten on a question that makes the
+// person pick one of two readings of their own life (是他們變了，還是你變了).
+// Four prompt versions did not stop it. Shown the same replies with and
+// without that question, unlabelled, the owner picked the ones without it in
+// 7 conversations of 7 (2026-11-26). Only the closing sentence goes, and only
+// when something is left to send.
+//
+// 還是 as "still" (我還是覺得) is not a choice, and neither is handing the
+// direction back (想再講，還是先停在這也可以), which the prompt asks for. A
+// second choice that opens on 要 or 得 (修嗎，還是得先撐一陣子) reads as "still"
+// here and stays: leaving a question in costs less than cutting a statement.
+const STILL = /(我|你|他|她|也|都|就|卻|但|可是|結果|最後|到頭來|終究|試過了，)還是|還是(會|要|得|很|有點|一樣|老樣子|算了|不要|別|講不通|沒用|睡不著)/
+const HANDS_IT_BACK = /還是.{0,14}(也可以|也行|都可以|都行|也沒關係|都好|也好)[。.！!～~]?\s*$/
+function offersAChoice(sentence) {
+  if (!sentence.includes('還是') || HANDS_IT_BACK.test(sentence)) return false
+  return [...sentence.matchAll(/.{0,6}還是.{0,4}/g)].some(([piece]) => !STILL.test(piece))
+}
+
+// Near a crisis the reply stays as the model wrote it: there, "do you mean it,
+// or is it a way of saying you are worn out" is the right question.
+const NEAR_A_CRISIS = /想死|不想活|活不下去|活下去|自殺|輕生|自殘|傷害自己|結束|消失|1925|1995|1980|119|113|專線|認真/
+
+function withoutClosingChoice(reply, userText) {
+  if (NEAR_A_CRISIS.test(reply) || NEAR_A_CRISIS.test(userText)) return reply
+  const paragraphs = reply.trim().split(/\n\s*\n/)
+  const sentences = paragraphs.at(-1).match(/[^。！？!?\n]+[。！？!?～~]*\n?/g) ?? [paragraphs.at(-1)]
+  if (!offersAChoice(sentences.at(-1))) return reply
+  const kept = sentences.slice(0, -1).join('').trim()
+  const rest = kept ? [...paragraphs.slice(0, -1), kept] : paragraphs.slice(0, -1)
+  return rest.length ? rest.join('\n\n') : reply
+}
+
 // LINE's reply token lasts one minute from the webhook. A model still writing
 // 55 seconds after the user sent the message is given up on (it gets at least
 // 5 seconds), so the fallback apology still reaches the user in time.
@@ -32,7 +64,7 @@ export async function handleText(userId, replyToken, userText, sentAt, { onRepli
       signal: AbortSignal.timeout(budget),
       deadline: Date.now() + budget,
     })
-    reply = stripMarkdown(text)
+    reply = withoutClosingChoice(stripMarkdown(text), userText)
     await replyMessage(replyToken, before ? [before, reply] : reply)
   } catch (err) {
     // Whoever apologises instead has to know what went unanswered.

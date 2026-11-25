@@ -9,6 +9,7 @@ The [README](../README.md) is the overview, in Traditional Chinese. This page is
 - LINE webhook signature verification (HMAC-SHA256); every event in a webhook is handled
 - Rich Menu with 4 buttons, set up by `scripts/setup-richmenu.mjs`: 隨意聊聊 (casual chat), 每日一句 (a line a day), 清除記憶 (clear memory), 關於 (about)
 - Typing indicator while the LLM writes the reply
+- A reply that closes on a question offering two choices (是他們變了，還是你變了) is sent without that question; the rest goes out as the model wrote it. Replies near a crisis are never touched
 - Stickers are answered: LINE's sticker keywords (and the text on message stickers) go to the model
 - Photos, videos, files, locations and audio links from outside LINE get a short "type or send voice instead" reply, which is remembered
 
