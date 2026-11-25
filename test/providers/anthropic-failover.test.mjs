@@ -316,6 +316,33 @@ describe('AnthropicProvider with no backup', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 
+  it('stops a chat at the caller\'s deadline with the caller\'s own error, even while the reply is being read', async () => {
+    mockFetch.mockImplementation(async (url, { signal }) => ({
+      ok: true,
+      status: 200,
+      json: () => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason))),
+    }))
+    const provider = new AnthropicProvider({ backup: null, retryPauseMs: 0 })
+
+    const err = await provider.chatCompletion(ask, { signal: AbortSignal.timeout(30), deadline: Date.now() + 30 }).catch((e) => e)
+
+    expect(err.name).toBe('TimeoutError')
+  })
+
+  it('keeps the backup inside the summary budget', async () => {
+    mockFetch.mockResolvedValueOnce(failed(400, 'invalid_request_error'))
+    const backup = {
+      send: jest.fn((op, body, signal) => new Promise((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason)))),
+    }
+    const provider = new AnthropicProvider({ backup, retryPauseMs: 0, summaryBudgetMs: 30 })
+
+    const startedAt = performance.now()
+    await expect(provider.summarize(null, [{ role: 'user', content: '最近很累' }])).rejects.toThrow()
+
+    expect(backup.send).toHaveBeenCalledTimes(1)
+    expect(performance.now() - startedAt).toBeLessThan(500)
+  }, 1_000)
+
   it('still asks once more after a fast overload', async () => {
     mockFetch.mockResolvedValueOnce(failed(529, 'overloaded_error')).mockResolvedValueOnce(ok('回覆'))
     const provider = new AnthropicProvider({ backup: null, retryPauseMs: 0 })
