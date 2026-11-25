@@ -70,6 +70,8 @@ describe('chat service', () => {
         ['哈那就難熬了\n\n窗戶看得到外面嗎，還是被困在裡面', '哈那就難熬了'],
         ['嗯\n\n那個卡的感覺，是什麼時候開始的？還是說，它一直都在，只是最近特別明顯？', '嗯\n\n那個卡的感覺，是什麼時候開始的？'],
         ['累爆喔\n\n這種加班累，是身體累還是心裡更累啦', '累爆喔'],
+        ['冷氣壞掉真的會要命\n\n馬上找人來修嗎，還是得先撐一陣子', '冷氣壞掉真的會要命'],
+        ['嗯，那個循環感\n\n你會這樣問，是今天特別悶？還是說最近發生了什麼事？', '嗯，那個循環感\n\n你會這樣問，是今天特別悶？'],
       ])('is left off: %j', async (written, sent) => {
         expect(await sentFor(written)).toBe(sent)
       })
@@ -87,6 +89,12 @@ describe('chat service', () => {
         ['a reply that is nothing else', '是他們變了，還是你變了'],
         ['a choice that is not the closing sentence', '是工作的事，還是家裡的事，你剛剛沒說\n\n不過不急，慢慢講'],
         ['an open question', '嗯，那種感覺滿難受的\n\n這樣多久了'],
+        ['還是 as "had better"', '累成這樣\n\n今天還是先休息吧'],
+        ['還是 as "had better", opening the sentence', '嗯\n\n還是早點睡比較好'],
+        ['a question that asks if something is still so', '嗯\n\n事情還是沒解決嗎？'],
+        ['還是 as "still" after a pause', '嗯\n\n想了很久，還是覺得是我的錯'],
+        ['還是 as "still" after 是', '她會念你很正常\n\n那個人是你媽，還是會擔心的'],
+        ['a choice with nothing that marks a question', '哈哈\n\n真的想去，還是就想想而已'],
       ])('stays for %s', async (_, written) => {
         expect(await sentFor(written)).toBe(written)
       })

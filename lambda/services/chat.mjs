@@ -14,15 +14,32 @@ function stripMarkdown(text) {
 // 7 conversations of 7 (2026-11-26). Only the closing sentence goes, and only
 // when something is left to send.
 //
-// 還是 as "still" (我還是覺得) is not a choice, and neither is handing the
-// direction back (想再講，還是先停在這也可以), which the prompt asks for. A
-// second choice that opens on 要 or 得 (修嗎，還是得先撐一陣子) reads as "still"
-// here and stays: leaving a question in costs less than cutting a statement.
-const STILL = /(我|你|他|她|也|都|就|卻|但|可是|結果|最後|到頭來|終究|試過了，)還是|還是(會|要|得|很|有點|一樣|老樣子|算了|不要|別|講不通|沒用|睡不著)/
+// 還是 is also "still" (試過了，還是講不通) and "had better" (還是先休息吧),
+// and cutting a statement costs more than leaving a question in, so the word
+// alone is not enough: the sentence has to show that it asks. Over 423 replies
+// the model wrote for made-up conversations this takes the closing choice off
+// 94 and leaves 4 in (真的想去，還是就想想而已, with nothing that marks a
+// question). Handing the direction back (還是先停在這也可以) is what the
+// prompt asks for, and stays.
 const HANDS_IT_BACK = /還是.{0,14}(也可以|也行|都可以|都行|也沒關係|都好|也好)[。.！!～~]?\s*$/
-function offersAChoice(sentence) {
+const SUGGESTS = /(吧|好了|算了|比較好|就好|再說)[。.！!～~]?\s*$/
+const PAUSE = '[，、,；;：:—–]\\s*'
+// 是他們變了，還是你變了; 是身體累還是心裡累. Not 那是你媽，還是會擔心的.
+const IS_OR = new RegExp(
+  `是[^。？?！!]{1,40}?(${PAUSE}|(?<![我你他她它們這那也都就卻但還人]))還是(?!會|要|得|很|覺得|放不下|忍不住|值得|可以|應該|比較|老樣子|一樣)`,
+)
+// 看得到外面嗎，還是被困在裡面: the first half already asks.
+const ASKS_THEN_OR = new RegExp(`(嗎|呢|有沒有|是不是|要不要|會不會|什麼|怎麼|多久|哪|誰|為什麼)[^。？?！!]{0,30}${PAUSE}還是`)
+// 真的想去，還是就想想而已？
+const OR_WITH_MARK = new RegExp(`${PAUSE}還是[^。！!]*[？?]\\s*$`)
+const ASKS = /[？?]\s*$|(嗎|呢)\s*$|有沒有|是不是|什麼|怎麼|多久|哪|誰|為什麼/
+
+function offersAChoice(sentence, sentenceBefore) {
   if (!sentence.includes('還是') || HANDS_IT_BACK.test(sentence)) return false
-  return [...sentence.matchAll(/.{0,6}還是.{0,4}/g)].some(([piece]) => !STILL.test(piece))
+  if (SUGGESTS.test(sentence) && !/[？?]/.test(sentence)) return false
+  // 還是說一直都有: carries on the question before it.
+  if (sentence.startsWith('還是')) return /[？?]\s*$/.test(sentence) || ASKS.test(sentenceBefore)
+  return IS_OR.test(sentence) || ASKS_THEN_OR.test(sentence) || OR_WITH_MARK.test(sentence)
 }
 
 // Near a crisis the reply stays as the model wrote it: there, "do you mean it,
@@ -33,7 +50,7 @@ function withoutClosingChoice(reply, userText) {
   if (NEAR_A_CRISIS.test(reply) || NEAR_A_CRISIS.test(userText)) return reply
   const paragraphs = reply.trim().split(/\n\s*\n/)
   const sentences = paragraphs.at(-1).match(/[^。！？!?\n]+[。！？!?～~]*\n?/g) ?? [paragraphs.at(-1)]
-  if (!offersAChoice(sentences.at(-1))) return reply
+  if (!offersAChoice(sentences.at(-1).trim(), (sentences.at(-2) ?? '').trim())) return reply
   const kept = sentences.slice(0, -1).join('').trim()
   const rest = kept ? [...paragraphs.slice(0, -1), kept] : paragraphs.slice(0, -1)
   return rest.length ? rest.join('\n\n') : reply
