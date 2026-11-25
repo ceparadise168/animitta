@@ -17,7 +17,7 @@
 ### 你傳的訊息會經過哪裡
 
 - **LINE**：訊息先送到 LINE，再轉給無相界。
-- **Amazon 的東京機房（AWS）**：無相界的程式跑在這裡，記憶也存在這裡的資料庫。
+- **Amazon 的東京機房（AWS）**：無相界的程式跑在這裡，記憶也存在這裡的資料庫。這個 AWS 帳號由維運者管理，維運時只看筆數這類統計，不讀對話內容。
 - **AI 服務**：要產生回覆，你傳的文字會交給「關於」裡寫的 AI 服務處理，現在是 Anthropic 的 Claude。
 - **Amazon 語音辨識**：只有傳語音時才會用到。
 
@@ -33,11 +33,6 @@
 - **每月上限 30 分鐘**：用量只記這個月用了幾秒，跟你的 LINE 使用者 ID 存在一起。為了把每個月的上限算準，每次有語音算進額度，就從那時起再留 40 天，清除記憶不會刪到它（[`lambda/services/voice.mjs`](lambda/services/voice.mjs)）。
 
 另外，出錯時寫下的紀錄不會有你打的字（[`lambda/services/chat.mjs`](lambda/services/chat.mjs)），紀錄也只留 30 天（[`cdk/lib/animitta-stack.ts`](cdk/lib/animitta-stack.ts)）。
-
-### 有兩件事，程式碼證明不了
-
-- **存著的記憶，我技術上看得到**：資料庫在我的 AWS 帳號裡。我承諾不看；修問題時只看有幾筆，不看內容。
-- **你沒辦法從外面確認，線上跑的就是這一版**：我的做法是只部署這裡 main 分支上的版本。GitHub 的自動部署走 `production` 環境，這個環境只接受 main，而且要我按核准（[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)）；從電腦部署的指令也會先檢查（[`scripts/deploy.mjs`](scripts/deploy.mjs)）。不過這些關卡都由我掌握，所以終究是我的承諾。
 
 ## 功能
 
@@ -88,7 +83,7 @@ flowchart TB
 1. Fork 這個 repo，把三個綁定本 repo 的地方改成你的 repo，再 commit 並 push 到你的 main：
    - [`scripts/deploy.mjs`](scripts/deploy.mjs) 只部署 origin 是 `github.com/ceparadise168/animitta` 的 checkout。
    - [`cdk/lib/animitta-stack.ts`](cdk/lib/animitta-stack.ts) 的 GitHub 部署角色只信任 `repo:ceparadise168/animitta:environment:production`。
-   - [`lambda/commands.mjs`](lambda/commands.mjs) 的「關於」裡，【原始碼】連到這個 repo，[`test/commands.test.mjs`](test/commands.test.mjs) 會檢查這個網址，要一起改。不改的話，你的使用者會被帶到這份 README，讀到的是我的承諾。
+   - [`lambda/commands.mjs`](lambda/commands.mjs) 的「關於」裡，【原始碼】連到這個 repo，[`test/commands.test.mjs`](test/commands.test.mjs) 會檢查這個網址，要一起改。不改的話，你的使用者會被帶到這份 README，讀到的是無相界的說明。
 2. 安裝套件。
 
    ```bash
