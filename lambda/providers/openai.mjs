@@ -23,7 +23,7 @@ export class OpenAiProvider extends LlmProvider {
       body: JSON.stringify({
         model: this.#chatModel,
         temperature: 0.8,
-        messages,
+        messages: messages.map(({ role, content }) => ({ role, content })),
       }),
     })
     if (!res.ok) throw new Error(`OpenAI chat failed: ${res.status}`)

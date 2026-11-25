@@ -1,4 +1,4 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals'
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals'
 
 const mockFetch = jest.fn()
 global.fetch = mockFetch
@@ -169,6 +169,99 @@ describe('AnthropicProvider', () => {
       await expect(
         provider.chatCompletion([{ role: 'user', content: '你好' }])
       ).rejects.toThrow('Anthropic chat failed: 400')
+    })
+  })
+
+  describe('a model for worries', () => {
+    const answering = () => mockFetch.mockResolvedValue({ ok: true, json: async () => ({ content: [{ type: 'text', text: '回覆' }] }) })
+    const sent = (call = 0) => JSON.parse(mockFetch.mock.calls[call][1].body)
+    const withWorriesModel = () => {
+      process.env.WORRIES_MODEL_ANTHROPIC = 'claude-sonnet-5-5'
+      process.env.WORRIES_EFFORT_ANTHROPIC = 'high'
+      return new AnthropicProvider()
+    }
+
+    afterEach(() => {
+      delete process.env.WORRIES_MODEL_ANTHROPIC
+      delete process.env.WORRIES_EFFORT_ANTHROPIC
+    })
+
+    it('answers worries, with its effort, and leaves the rest to the chat model', async () => {
+      answering()
+      const provider = withWorriesModel()
+
+      await provider.chatCompletion([{ role: 'user', content: '最近很卡' }], { worries: true })
+      await provider.chatCompletion([{ role: 'user', content: '今天天氣好' }])
+
+      expect(provider.answersWorries).toBe(true)
+      expect(sent(0)).toMatchObject({ model: 'claude-sonnet-5-5', max_tokens: 16000, output_config: { effort: 'high' } })
+      expect(sent(0).temperature).toBeUndefined()
+      expect(sent(1)).toMatchObject({ model: 'claude-haiku-4-5-20251001', temperature: 0.8 })
+    })
+
+    it('is the chat model itself when none is configured', async () => {
+      answering()
+
+      await provider.chatCompletion([{ role: 'user', content: '最近很卡' }], { worries: true })
+
+      expect(provider.answersWorries).toBe(false)
+      expect(sent().model).toBe('claude-haiku-4-5-20251001')
+    })
+
+    it('is not stood in for by the backup, which is the chat model elsewhere', async () => {
+      const backup = { send: jest.fn() }
+      process.env.WORRIES_MODEL_ANTHROPIC = 'claude-sonnet-5-5'
+      const provider = new AnthropicProvider({ backup, retryPauseMs: 0 })
+      mockFetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({ error: { type: 'not_found_error' } }) })
+
+      await expect(provider.chatCompletion([{ role: 'user', content: '最近很卡' }], { worries: true })).rejects.toThrow('Anthropic chat failed: 404 not_found_error')
+      expect(backup.send).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('what is the same for everyone', () => {
+    it('goes first, marked so Anthropic may keep it, and what is said of one person follows', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ content: [{ type: 'text', text: '回覆' }] }) })
+
+      await provider.chatCompletion([
+        { role: 'system', content: '提示詞', sameForEveryone: true },
+        { role: 'system', content: '示範', sameForEveryone: true },
+        { role: 'system', content: '這個人的摘要' },
+        { role: 'user', content: '你好' },
+      ])
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+      expect(body.system).toEqual([
+        { type: 'text', text: '提示詞\n\n示範', cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: '\n\n這個人的摘要' },
+      ])
+      expect(body.messages).toEqual([{ role: 'user', content: '你好' }])
+    })
+
+    it('is the only block when nothing is said of the person', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ content: [{ type: 'text', text: '回覆' }] }) })
+
+      await provider.chatCompletion([{ role: 'system', content: '提示詞', sameForEveryone: true }, { role: 'user', content: '你好' }])
+
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body).system).toEqual([{ type: 'text', text: '提示詞', cache_control: { type: 'ephemeral' } }])
+    })
+  })
+
+  describe('ask', () => {
+    it('puts a short question to the chat model and gives back its word', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ content: [{ type: 'text', text: '是' }] }) })
+
+      const answer = await provider.ask('這句是不是二選一？')
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+      expect(answer).toBe('是')
+      expect(body).toEqual({ model: 'claude-haiku-4-5-20251001', max_tokens: 8, temperature: 0, messages: [{ role: 'user', content: '這句是不是二選一？' }] })
+    })
+
+    it('fails when the model does, so whoever asked can go on without the answer', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 400, json: async () => ({ error: { type: 'invalid_request_error' } }) })
+
+      await expect(provider.ask('這句是不是二選一？')).rejects.toThrow('Anthropic ask failed: 400 invalid_request_error')
     })
   })
 

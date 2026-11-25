@@ -34,6 +34,8 @@ export class AnthropicProvider extends LlmProvider {
   #apiKey
   #chatModel
   #chatEffort
+  #worriesModel
+  #worriesEffort
   #summaryModel
   #backup
   #retryPauseMs
@@ -59,20 +61,48 @@ export class AnthropicProvider extends LlmProvider {
     this.#chatModel =
       process.env.CHAT_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
     this.#chatEffort = process.env.CHAT_EFFORT_ANTHROPIC || null
+    // A second model for worries: one that thinks before it answers. Unset,
+    // the chat model answers everything.
+    this.#worriesModel = process.env.WORRIES_MODEL_ANTHROPIC || null
+    this.#worriesEffort = process.env.WORRIES_EFFORT_ANTHROPIC || null
     this.#summaryModel =
       process.env.SUMMARY_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
+  }
+
+  get answersWorries() {
+    return Boolean(this.#worriesModel)
   }
 
   // deadline: when the caller's signal fires (ms since epoch). With a backup
   // and little time left, as after a long voice transcription, one try gets
   // only half of it, so the backup still has the other half. Without a
   // backup, the try runs until the signal fires.
-  async chatCompletion(messages, { signal, deadline } = {}) {
+  // worries: answer with the model kept for worries, when there is one. The
+  // backup is the chat model on Amazon Bedrock, so it does not stand in for it.
+  async chatCompletion(messages, { signal, deadline, worries = false } = {}) {
+    const forWorries = worries && this.answersWorries
     const { system, userMessages } = this.#extractSystem(messages)
-    const body = { ...this.#chatTuning(), ...(system && { system }), messages: userMessages }
+    const body = { ...tuningFor(forWorries ? this.#worriesEffort : this.#chatEffort), ...(system && { system }), messages: userMessages }
     const attemptMs = () => (deadline ? Math.min(this.#chatAttemptMs, Math.max(1_000, (deadline - Date.now()) / 2)) : this.#chatAttemptMs)
-    const data = await this.#send('chat', this.#chatModel, body, { signal, attemptMs })
+    const data = await this.#send('chat', forWorries ? this.#worriesModel : this.#chatModel, body, {
+      signal,
+      attemptMs,
+      backup: forWorries ? null : this.#backup,
+    })
     return { text: readReplyText(data) }
+  }
+
+  // A short question the chat model answers in a word: what kind of talk this
+  // is, whether a sentence asks for a choice. No backup: whoever asks goes on
+  // without the answer.
+  async ask(question, { signal } = {}) {
+    const short = this.#chatEffort ? { max_tokens: 2000, output_config: { effort: 'low' } } : { max_tokens: 8, temperature: 0 }
+    const data = await this.#send('ask', this.#chatModel, { ...short, messages: [{ role: 'user', content: question }] }, {
+      signal,
+      attemptMs: () => this.#chatAttemptMs,
+      backup: null,
+    })
+    return readReplyText(data)
   }
 
   // Anthropic first, once more if the failure looks temporary, then the
@@ -80,11 +110,11 @@ export class AnthropicProvider extends LlmProvider {
   // the caller's signal or the provider's own budget ends, nothing more is
   // tried. The caller's signal ends it with the caller's own error; the
   // budget ends it as no response, which the alert reads.
-  async #send(op, model, body, { signal, budgetMs, attemptMs }) {
+  async #send(op, model, body, { signal, budgetMs, attemptMs, backup = this.#backup }) {
     const budget = budgetMs ? withTimeout(signal, budgetMs) : signal
     let failure
     for (let attempt = 1; attempt <= 2; attempt++) {
-      const attemptSignal = this.#backup ? withTimeout(budget, attemptMs()) : budget
+      const attemptSignal = backup ? withTimeout(budget, attemptMs()) : budget
       const startedAt = Date.now()
       try {
         return await askAnthropic(op, this.#apiKey, model, body, attemptSignal)
@@ -100,9 +130,9 @@ export class AnthropicProvider extends LlmProvider {
     const rateLimited = failure.status === 429 && failure.code !== SPEND_CAP
     // A limit Eric set himself in the Console is his to lift, not to route around.
     const ownLimit = failure.code === 'specified_limit_reached'
-    if (!this.#backup || budget?.aborted || rateLimited || ownLimit) throw failure
+    if (!backup || budget?.aborted || rateLimited || ownLimit) throw failure
     try {
-      const data = await this.#backup.send(op, body, budget)
+      const data = await backup.send(op, asOneSystemText(body), budget)
       // Counted by an alarm: people still get answers, but Anthropic is down.
       console.warn(`Provider fallback: ${failure.message} -> Bedrock ${op} ok`)
       return data
@@ -111,14 +141,6 @@ export class AnthropicProvider extends LlmProvider {
         status: failure.status,
       })
     }
-  }
-
-  // Claude 4.6+ models reject temperature and think before answering; they are
-  // tuned with effort instead, and need max_tokens room for the thinking.
-  #chatTuning() {
-    return this.#chatEffort
-      ? { max_tokens: 16000, output_config: { effort: this.#chatEffort } }
-      : { max_tokens: 1024, temperature: 0.8 }
   }
 
   async summarize(existingSummary, turns) {
@@ -155,17 +177,16 @@ export class AnthropicProvider extends LlmProvider {
     return data.content[0].text
   }
 
+  // The prompt and its demos are the same for everyone and far longer than
+  // anything else sent, so they go first in a block Anthropic may keep for a
+  // few minutes and bill at a tenth when it is read again. What is said of one
+  // person (their summary, a passage looked up) follows in a block of its own.
   #extractSystem(messages) {
-    let systemParts = []
-    let nonSystem = []
-
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        systemParts.push(msg.content)
-      } else {
-        nonSystem.push(msg)
-      }
-    }
+    const said = (sameForEveryone) =>
+      messages.filter((m) => m.role === 'system' && Boolean(m.sameForEveryone) === sameForEveryone).map((m) => m.content)
+    const shared = said(true)
+    const systemParts = said(false)
+    const nonSystem = messages.filter((m) => m.role !== 'system')
 
     // Merge consecutive same-role messages
     const merged = []
@@ -178,8 +199,13 @@ export class AnthropicProvider extends LlmProvider {
       }
     }
 
+    const own = systemParts.join('\n\n')
+    if (!shared.length) return { system: own || null, userMessages: merged }
     return {
-      system: systemParts.length > 0 ? systemParts.join('\n\n') : null,
+      system: [
+        { type: 'text', text: shared.join('\n\n'), cache_control: { type: 'ephemeral' } },
+        ...(own ? [{ type: 'text', text: `\n\n${own}` }] : []),
+      ],
       userMessages: merged,
     }
   }
@@ -226,6 +252,18 @@ async function anthropicFailure(op, res) {
   const type = ERROR_TYPES.has(error?.type) ? error.type : undefined
   const named = code ?? type
   return Object.assign(new Error(`Anthropic ${op} failed: ${res.status}${named ? ` ${named}` : ''}`), { status: res.status, code })
+}
+
+// Claude 4.6+ models reject temperature and think before answering; they are
+// tuned with effort instead, and need max_tokens room for the thinking.
+function tuningFor(effort) {
+  return effort ? { max_tokens: 16000, output_config: { effort } } : { max_tokens: 1024, temperature: 0.8 }
+}
+
+// The backup is sent the system text whole, as it was before the text was
+// split into a block Anthropic may keep: the mark is Anthropic's own.
+function asOneSystemText(body) {
+  return Array.isArray(body.system) ? { ...body, system: body.system.map((block) => block.text).join('') } : body
 }
 
 function withTimeout(signal, ms) {
