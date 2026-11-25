@@ -28,6 +28,9 @@ const ABOUT_MESSAGE =
   '【記憶與隱私】\n' +
   `對話傳送與存放都加密，記憶只用來接話，${RETENTION_DAYS} 天未互動自動清空（或隨時按「清除記憶」）。\n` +
   `文字由 ${AI_SERVICE} 處理（不用於訓練）；語音經 Amazon 轉文字後即刪，每月上限 ${VOICE_MINUTES_PER_MONTH} 分鐘。\n\n` +
+  '【原始碼】\n' +
+  '公開的原始碼在這，想了解你的訊息如何被處理，或是想做一個專屬於你的 bot 都歡迎參考：\n' +
+  'https://github.com/ceparadise168/animitta#readme\n\n' +
   '【緣起與維護】\n' +
   '這是我上一份工作時受公司理念啟發的個人專案，目前個人自費維護。\n' +
   '覺得有幫助的話，歡迎分享給朋友，或隨喜捐款支持慈善團體！\n\n' +

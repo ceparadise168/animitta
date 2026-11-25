@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 
-// 金剛經全文：鳩摩羅什譯，流通本（佛教城 book.bfnn.org/books/0040），the text
+// 金剛經全文：鳩摩羅什譯，流通本（報佛恩網・般若文海 book.bfnn.org/books/0040.htm），the text
 // most people recite, chosen by the owner on 2026-11-23. It carries no chapter
 // titles, so the 32 titles (昭明太子's division) are kept from the previous
 // text, split at the same places. Its words differ from that text only in

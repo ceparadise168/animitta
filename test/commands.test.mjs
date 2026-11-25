@@ -101,6 +101,16 @@ describe('commands', () => {
     expect(text).toContain('每月上限 25 分鐘')
   })
 
+  // On a phone, the repository's front page shows its file list first; #readme
+  // opens it at the README, whose first section is written for these users.
+  it('gives the public code a block of its own, with the link alone on its line so LINE makes all of it tappable', async () => {
+    await handleCommand('user1', 'token1', '@關於')
+
+    expect(mockReplyMessage.mock.calls[0][1]).toMatch(
+      /【原始碼】\n[^\n]+\nhttps:\/\/github\.com\/ceparadise168\/animitta#readme\n/
+    )
+  })
+
 
   it.each([
     ['the menu button', () => handlePostback('user1', 'token1', 'action=daily_line', Date.parse('2026-11-23T09:00:00+08:00'))],
