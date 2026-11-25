@@ -28,6 +28,10 @@
 - **存著的記憶，我技術上看得到**：資料庫在我的 AWS 帳號裡。我承諾不看；修問題時只看有幾筆，不看內容。
 - **你沒辦法從外面確認，線上跑的就是這一版**：我的做法是只部署這裡 main 分支上的版本。GitHub 的自動部署只接受 main，而且要我按核准（[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)）；從電腦部署的指令也會先檢查（[`scripts/deploy.mjs`](scripts/deploy.mjs)）。不過這些關卡都由我掌握，所以終究是我的承諾。
 
+### 想做一個自己的 bot
+
+歡迎參考，程式碼用 MIT 授權。要自己準備 AWS 帳號、LINE 官方帳號（Messaging API）和 Anthropic 的 API key；步驟在下面英文的 [Quick Start](#quick-start)，fork 之後至少有兩個地方要先改，那裡也有寫。
+
 ---
 
 A LINE Bot for free-form conversation through a Diamond Sutra (金剛經) lens. It lets people chat naturally first — venting, wondering, asking practical questions, or seeking Buddhist insight — and brings scripture in only when it helps.
@@ -93,7 +97,7 @@ LINE App → Lambda Function URL → Lambda (Node.js 22.x) → Anthropic (Claude
 
 ### Setup
 
-These are the steps for Eric's own bot. `npm run deploy` refuses any origin but github.com/ceparadise168/animitta, and the GitHub deploy role in `cdk/lib/animitta-stack.ts` trusts only this repository's `production` environment, so a fork changes both first.
+These are the steps for Eric's own bot. `npm run deploy` refuses any origin but github.com/ceparadise168/animitta, and the GitHub deploy role in `cdk/lib/animitta-stack.ts` trusts only this repository's `production` environment, so a fork changes both first. The stack also expects the account to have GitHub's OIDC provider (`token.actions.githubusercontent.com`) already: it imports it rather than creating it.
 
 ```bash
 # Clone and install
