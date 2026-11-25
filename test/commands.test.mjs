@@ -103,11 +103,11 @@ describe('commands', () => {
 
   // On a phone, the repository's front page shows its file list first; #readme
   // opens it at the README, whose first section is written for these users.
-  it('links to the README of the public code, with nothing after the link on its line so LINE makes all of it tappable', async () => {
+  it('gives the public code a block of its own, with the link alone on its line so LINE makes all of it tappable', async () => {
     await handleCommand('user1', 'token1', '@關於')
 
     expect(mockReplyMessage.mock.calls[0][1]).toMatch(
-      /想看它怎麼處理你的訊息都可以：https:\/\/github\.com\/ceparadise168\/animitta#readme\n/
+      /【原始碼】\n[^\n]+\nhttps:\/\/github\.com\/ceparadise168\/animitta#readme\n/
     )
   })
 
