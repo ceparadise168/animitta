@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals'
-import { passagesFor, passageNote, DAILY_LINES, todaysLine, todaysLineReply, lineAt, lineIn, lineReply, askAboutLine, passageOf, sentenceOf } from '../lambda/sutra.mjs'
+import { passagesFor, passageNote, DAILY_LINES, todaysLine, todaysLineReply, lineAt, lineIn, lineReply, passageOf } from '../lambda/sutra.mjs'
 import { buildMessages } from '../lambda/prompt.mjs'
 import { EVERYDAY_MESSAGES } from './fixtures/everyday-messages.mjs'
 
@@ -191,11 +191,6 @@ describe('the lines after the day\'s one', () => {
     expect(quotesClose(passageOf(lineAt(i)))).toBe(true)
   })
 
-  it.each(DAILY_LINES.map((_, i) => [i]))('hand the model the right chapter when 多了解這一段 is pressed under line %d', (i) => {
-    const shown = lineAt(i)
-    expect(passagesFor(askAboutLine(shown))[0].chapter.title).toBe(shown.chapter.title)
-  })
-
   it('can be told apart from other replies by the line they show', () => {
     expect(lineIn(lineReply(lineAt(19), { first: true })).index).toBe(19)
     expect(lineIn(lineReply(lineAt(20))).index).toBe(20)
@@ -203,22 +198,29 @@ describe('the lines after the day\'s one', () => {
   })
 })
 
-describe('asking about a line', () => {
-  it('gives the whole sentence the line was cut from, which says what 是法 is', () => {
-    expect(sentenceOf(lineAt(19))).toBe('是法平等，無有高下，是名阿耨多羅三藐三菩提')
-    expect(askAboutLine(lineAt(19))).toContain('它在原文裡是一整句：「是法平等，無有高下，是名阿耨多羅三藐三菩提」。')
+// What 多了解這一段 says is written by hand, so the rules a written note keeps
+// are checked here: the model's own replies get them from the prompt.
+describe('the note of a daily line', () => {
+  const length = (text) => [...text.replace(/\s/g, '')].length
+  const notes = DAILY_LINES.map(([line, , note]) => [line, note])
+
+  it.each(notes)('is written for 「%s」', (_, note) => {
+    expect(typeof note).toBe('string')
+    expect(length(note)).toBeGreaterThan(40)
   })
 
-  it('says nothing more for a line that is a whole sentence already', () => {
-    expect(sentenceOf(lineAt(16))).toBe('過去心不可得，現在心不可得，未來心不可得')
-    expect(askAboutLine(lineAt(16))).not.toContain('一整句')
+  it.each(notes)('stays short enough to read in a chat under 「%s」', (_, note) => {
+    expect(length(note)).toBeLessThanOrEqual(160)
   })
 
-  it.each(DAILY_LINES.map((_, i) => [i]))('finds the sentence of line %d inside its chapter', (i) => {
-    const shown = lineAt(i)
-    const words = (text) => text.replace(/[^一-鿿]/g, '')
-    expect(shown.chapter.text).toContain(sentenceOf(shown))
-    expect(words(sentenceOf(shown))).toContain(words(shown.line))
+  it.each(notes)('explains 「%s」 without addressing the reader or using Markdown', (_, note) => {
+    expect(note).not.toMatch(/[你妳您]/)
+    expect(note).not.toMatch(/[*#_~`>]/)
+  })
+
+  it('comes with the line', () => {
+    expect(lineAt(19).note).toBe(DAILY_LINES[19][2])
+    expect(lineAt(19).note).toContain('是法')
   })
 })
 

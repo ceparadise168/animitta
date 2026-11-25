@@ -127,15 +127,6 @@ describe('chat service', () => {
       expect(onReplied).not.toHaveBeenCalled()
     })
 
-    it('sends a fixed message ahead of the answer when asked, and remembers both', async () => {
-      mockProvider.chatCompletion.mockResolvedValue({ text: '這段在講心抓不住' })
-
-      await handleText('user1', 'token1', '想多了解這一句', 1795270000000, { before: '〈一體同觀分第十八〉原文：…' })
-
-      expect(mockReplyMessage).toHaveBeenCalledWith('token1', ['〈一體同觀分第十八〉原文：…', '這段在講心抓不住'])
-      expect(mockSaveTurn).toHaveBeenCalledWith('user1', '想多了解這一句', '〈一體同觀分第十八〉原文：…\n\n這段在講心抓不住', 1795270000000)
-    })
-
     it('says which words went unanswered when the model fails', async () => {
       mockProvider.chatCompletion.mockRejectedValue(new Error('Anthropic chat failed: 529'))
 

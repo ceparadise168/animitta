@@ -210,41 +210,29 @@ export function passagesFor(userText, recentTurns = []) {
     .slice(0, MOST_CHAPTERS)
 }
 
-// 每日一句: on a Taipei day everyone's first line is the same, going through
+// 每日一句: the lines, the chapter each is from, and what 多了解這一段 says
+// about it. On a Taipei day everyone's first line is the same, going through
 // the sutra in order, and pressing again reads on from there, so a press is
-// never a fresh draw (that would be 抽籤). Each line is the text word for word,
-// with its chapter. Lines that read as a rebuke when shown alone are left out
-// (是人行邪道, and the two that call the reader 凡夫), and so is a second line
-// on giving in a row.
-export const DAILY_LINES = [
-  ['飯食訖，收衣缽，洗足已，敷座而坐。', 1],
-  ['應云何住？云何降伏其心？', 2],
-  ['菩薩於法，應無所住，行於布施。', 4],
-  ['凡所有相，皆是虛妄。若見諸相非相，即見如來。', 5],
-  ['知我說法，如筏喻者，法尚應捨，何況非法。', 6],
-  ['一切賢聖，皆以無為法而有差別。', 7],
-  ['所謂佛法者，即非佛法。', 8],
-  ['莊嚴佛土者，即非莊嚴，是名莊嚴。', 10],
-  ['應無所住而生其心。', 10],
-  ['如來說：世界，非世界，是名世界。', 13],
-  ['信心清淨，則生實相。', 14],
-  ['離一切諸相，即名諸佛。', 14],
-  ['若心有住，即為非住。', 14],
-  ['若菩薩心不住法而行布施，如人有目，日光明照，見種種色。', 14],
-  ['如來者，即諸法如義。', 17],
-  ['一切法皆是佛法。', 17],
-  ['過去心不可得，現在心不可得，未來心不可得。', 18],
-  ['諸心皆為非心，是名為心。', 18],
-  ['說法者，無法可說，是名說法。', 21],
-  ['是法平等，無有高下。', 23],
-  ['以無我、無人、無眾生、無壽者，修一切善法。', 23],
-  ['於法不說斷滅相。', 27],
-  ['菩薩所作福德，不應貪著。', 28],
-  ['如來者，無所從來，亦無所去，故名如來。', 29],
-  ['於一切法，應如是知，如是見，如是信解，不生法相。', 31],
-  ['不取於相，如如不動。', 32],
-  ['一切有為法，如夢幻泡影，如露亦如電，應作如是觀。', 32],
-]
+// never a fresh draw (that would be 抽籤). Each line is the text word for word.
+// Lines that read as a rebuke when shown alone are left out (是人行邪道, and the
+// two that call the reader 凡夫), and so is a second line on giving in a row.
+//
+// The note is written once and checked by a person, not asked of the model
+// each time. Asked live, Haiku 4.5 read 是法平等 as "no practice ranks above
+// another" in 4 of 4 answers, where 六祖's and 印順's commentaries both read 是法
+// as the awakening itself, no more in a Buddha and no less in anyone else; it
+// read 無為法 as an easygoing attitude and 信心 as not being faith (2026-11-25).
+// Opus 5.5 and Fable 5.2 read these rightly, but took 4 to 7 seconds, ran
+// past the 150 characters asked for in all 145 answers, and closed 125 of them
+// on 有人讀成…也有人讀成….
+//
+// A note says who is speaking, what the line answers, and what it means in
+// plain words. It does not address the reader or say what they should do, and
+// stays within 160 characters. Each reading rests on the chapter itself and on
+// 六祖惠能《金剛經解義》 and 印順《般若經講記》 (CBETA X0459, Y0001).
+export const DAILY_LINES = JSON.parse(readFileSync(new URL('./daily-lines.json', import.meta.url), 'utf8')).map(
+  ({ line, chapter, note }) => [line, chapter, note],
+)
 
 const TAIPEI_OFFSET_MS = 8 * 3_600_000
 const DAY_MS = 86_400_000
@@ -252,8 +240,8 @@ const DAY_MS = 86_400_000
 /** The line at a place in DAILY_LINES; past the last one it starts again. */
 export function lineAt(index) {
   const at = ((index % DAILY_LINES.length) + DAILY_LINES.length) % DAILY_LINES.length
-  const [line, chapterNumber] = DAILY_LINES[at]
-  return { index: at, line, chapter: CHAPTERS[chapterNumber - 1] }
+  const [line, chapterNumber, note] = DAILY_LINES[at]
+  return { index: at, line, chapter: CHAPTERS[chapterNumber - 1], note }
 }
 
 /** The Taipei calendar day a time falls on, counted in days. */
@@ -282,8 +270,7 @@ export function lineIn(reply) {
 
 // 多了解這一段 first shows the whole chapter as it reads, so the passage never
 // comes from the model: asked to retell it, the model mixed up who said what
-// in 4 of 8 tries (2026-11-23). Then the model explains it. The line goes into
-// the question as a quote, so the lookup above hands the model the chapter too.
+// in 4 of 8 tries (2026-11-23). The line's note follows it.
 const passageHeading = ({ chapter }) => `〈${chapter.title}〉原文：`
 
 // The circulated text opens each paragraph of a long speech with 「 and closes
@@ -297,45 +284,6 @@ export function passageOf(shown) {
 
 /** Whether a reply the bot sent showed this line's chapter, as 多了解這一段 does. */
 export const showsPassageOf = (reply, shown) => reply.includes(passageHeading(shown))
-
-const SENTENCE_STARTS_AFTER = '。！？；「\n'
-const SENTENCE_ENDS_AT = '。！？；」\n'
-const words = (text) => (text.match(/[一-鿿]/g) || []).join('')
-
-// The whole sentence a daily line was cut from, found by its characters, since
-// a line's punctuation can differ from the chapter's. A cut line can lose what
-// it is about: 於法不說斷滅相 is said of 發阿耨多羅三藐三菩提心者, and 是法平等，
-// 無有高下 goes on 是名阿耨多羅三藐三菩提. The sentence alone does not stop the
-// model misreading: given it, the model still read 是法 as "every practice" in
-// 6 of 8 tries, where without it, as "good deeds" in 6 of 6 (2026-11-25).
-export function sentenceOf({ line, chapter }) {
-  const { text } = chapter
-  const at = [...text.matchAll(/[一-鿿]/g)].map(({ index }) => index)
-  const first = at.map((i) => text[i]).join('').indexOf(words(line))
-  let start = at[first]
-  let end = at[first + words(line).length - 1] + 1
-  while (start > 0 && !SENTENCE_STARTS_AFTER.includes(text[start - 1])) start--
-  while (end < text.length && !SENTENCE_ENDS_AT.includes(text[end])) end++
-  return text.slice(start, end)
-}
-
-// Asked only what the passage says and what the line means in it, the model
-// ran past the prompt's 220 characters on all 27 lines (median 301) and told
-// the reader what they were doing wrong (你表面在幫人，實際上在幫自己立功德).
-// Asked this way, 4 of 54 answers ran past it (median 181; 2026-11-25,
-// scripts/check-line-explanations.mjs). Told to call a reading 其中一種讀法
-// whenever unsure, it did so in 6 of 15 answers over three presses in a row,
-// hence 前面提過就不用再提.
-export function askAboutLine(shown) {
-  const { line, chapter } = shown
-  const whole = sentenceOf(shown)
-  return (
-    `想多了解這一句：「${line}」（${chapter.title}）。` +
-    (words(whole) === words(line) ? '' : `它在原文裡是一整句：「${whole}」。`) +
-    '整段原文我看過了，不用重講。用白話講就好，短一點（150 字左右）：這段在說什麼、這句在裡面指的是什麼。' +
-    '照原文本來的意思講，術語用一般的解釋；讀法不只一種的地方提一句就好，前面提過就不用再提；不用拿我舉例，也不用勸我怎麼做。'
-  )
-}
 
 export function passageNote(passages) {
   return (

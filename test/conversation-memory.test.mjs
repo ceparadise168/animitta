@@ -201,18 +201,27 @@ describe('conversation memory, end to end', () => {
       expect(lineReplies).toEqual([1, 2, 3].map((ahead) => lineReply(lineAt(today.index + ahead))))
     })
 
-    it('shows a chapter once: 多了解這一段 under the next line of it sends the explanation alone', async () => {
+    it('shows a chapter once: 多了解這一段 under the next line of it sends the note alone, and the model is never asked', async () => {
       await press('action=daily_line_more&line=19')
       await press('action=daily_line_next&line=19')
       await press('action=daily_line_more&line=20')
 
       expect(lineReplies).toEqual([
         expect.stringMatching(/^〈淨心行善分第二十三〉原文：\n\n「復次，須菩提！是法平等/),
-        '（模型的回覆）',
+        lineAt(19).note,
         lineReply(lineAt(20)),
-        '（模型的回覆）',
+        lineAt(20).note,
       ])
-      expect(everythingSent(chatRequests[1])).toContain('所言善法者，如來說即非善法，是名善法。')
+      expect(chatRequests).toEqual([])
+    })
+
+    it('answers a question typed after a note with the note and its chapter at hand', async () => {
+      await press('action=daily_line_more&line=19')
+      await sendText('這句是什麼意思？')
+
+      const sent = everythingSent(chatRequests[0])
+      expect(sent).toContain(lineAt(19).note)
+      expect(sent).toContain('所言善法者，如來說即非善法，是名善法。')
     })
 
     it('remembers the casual-chat opener the user is answering', async () => {

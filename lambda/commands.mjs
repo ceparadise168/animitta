@@ -1,8 +1,8 @@
 import { replyMessage, replyWithQuickReply } from './line.mjs'
 import { clearMemory, getContext, RETENTION_DAYS } from './services/memory.mjs'
-import { handleText, replyAndRemember } from './services/chat.mjs'
+import { replyAndRemember } from './services/chat.mjs'
 import { VOICE_MINUTES_PER_MONTH } from './services/voice.mjs'
-import { DAILY_LINES, askAboutLine, lineAt, lineIn, lineReply, passageOf, showsPassageOf, taipeiDay, todaysLine } from './sutra.mjs'
+import { DAILY_LINES, lineAt, lineIn, lineReply, passageOf, showsPassageOf, taipeiDay, todaysLine } from './sutra.mjs'
 
 const CASUAL_CHAT_STARTERS = [
   '嗨～今天過得還好嗎？\n想到什麼都可以直接聊。',
@@ -85,8 +85,8 @@ async function handleCasualChat(userId, replyToken, sentAt) {
 }
 
 // Under each 每日一句 message, two buttons: 多了解這一段 shows the whole chapter
-// as it reads, then the model explains it like a question the person typed; 再給一句
-// brings the next line in the sutra's order, so it is reading on, not a draw.
+// as it reads, then the line's note; 再給一句 brings the next line in the
+// sutra's order, so it is reading on, not a draw.
 // The buttons go only under these fixed lines, never under chat replies (the
 // suggestion buttons taken off on 2026-05-21 had people tapping instead of
 // thinking).
@@ -162,14 +162,16 @@ async function handleNextLine(userId, replyToken, shown, sentAt) {
   })
 }
 
-// A chapter already shown in what the bot remembers is not sent again: the
-// person has it just above, and the model has it from the lookup either way
-// (2026-11-25: one chapter three times in six minutes).
+// The chapter, then the line's note. A chapter already shown in what the bot
+// remembers is not sent again: the person has it just above (2026-11-25: one
+// chapter three times in six minutes). Remembered with the line it was asked
+// under, so a question typed next is answered with the note at hand.
 async function handleMoreAboutLine(userId, replyToken, shown, sentAt) {
   const shownBefore = everyTurn(await readMemory(userId)).some(
     ({ role, content }) => role === 'assistant' && showsPassageOf(content, shown),
   )
-  return handleText(userId, replyToken, askAboutLine(shown), sentAt, shownBefore ? {} : { before: passageOf(shown) })
+  const reply = shownBefore ? [shown.note] : [passageOf(shown), shown.note]
+  return replyAndRemember(userId, replyToken, `（按了「${shown.line}」底下的「多了解這一段」）`, reply, sentAt)
 }
 
 async function handleClearMemory(replyToken) {

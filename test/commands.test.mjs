@@ -19,10 +19,8 @@ jest.unstable_mockModule('../lambda/services/memory.mjs', () => ({
 }))
 
 const mockReplyAndRemember = jest.fn()
-const mockHandleText = jest.fn()
 jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({
   replyAndRemember: mockReplyAndRemember,
-  handleText: mockHandleText,
 }))
 
 jest.unstable_mockModule('../lambda/services/voice.mjs', () => ({ VOICE_MINUTES_PER_MONTH: 25 }))
@@ -35,7 +33,7 @@ const remembering = (recentTurns, previousSession = null) => ({ summary: null, r
 const turnsOf = (...calls) =>
   calls.flatMap(([, , userSide, reply]) => [
     { role: 'user', content: userSide },
-    { role: 'assistant', content: reply },
+    { role: 'assistant', content: [reply].flat().join('\n\n') },
   ])
 
 describe('commands', () => {
@@ -46,7 +44,6 @@ describe('commands', () => {
     mockClearMemory.mockResolvedValue(undefined)
     mockGetContext.mockResolvedValue(remembering([]))
     mockReplyAndRemember.mockResolvedValue(undefined)
-    mockHandleText.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -165,43 +162,41 @@ describe('commands', () => {
       expect(mockReplyAndRemember.mock.calls[0][3]).toContain(`「${DAILY_LINES[0][0]}」`)
     })
 
-    it('多了解這一段 shows the whole chapter, then asks the model about that line', async () => {
+    it("多了解這一段 shows the whole chapter, then the line's note, and remembers both under that line", async () => {
       await handlePostback('user1', 'token1', 'action=daily_line_more&line=17', MORNING)
 
-      const [userId, replyToken, asked, sentAt, { before }] = mockHandleText.mock.calls[0]
+      const [userId, replyToken, userSide, [passage, note], sentAt, options] = mockReplyAndRemember.mock.calls[0]
       expect([userId, replyToken, sentAt]).toEqual(['user1', 'token1', MORNING])
-      expect(asked).toContain(`「${DAILY_LINES[17][0]}」`)
-      expect(before).toMatch(/^〈一體同觀分第十八〉原文：\n\n/)
-      expect(before).toContain('過去心不可得，現在心不可得，未來心不可得。')
-      expect(mockReplyAndRemember).not.toHaveBeenCalled()
+      expect(userSide).toBe(`（按了「${DAILY_LINES[17][0]}」底下的「多了解這一段」）`)
+      expect(passage).toMatch(/^〈一體同觀分第十八〉原文：\n\n/)
+      expect(passage).toContain('過去心不可得，現在心不可得，未來心不可得。')
+      expect(note).toBe(lineAt(17).note)
+      expect(options).toBeUndefined()
     })
 
-    it('多了解這一段 leaves out a chapter it already showed, and still asks about the line', async () => {
+    it('多了解這一段 leaves out a chapter it already showed, and still gives the note', async () => {
       await handlePostback('user1', 'token1', 'action=daily_line_more&line=19', MORNING)
-      const [, , asked, , { before }] = mockHandleText.mock.calls[0]
-      mockGetContext.mockResolvedValue(
-        remembering([
-          { role: 'user', content: asked },
-          { role: 'assistant', content: `${before}\n\n（模型的解釋）` },
-        ]),
-      )
+      const first = mockReplyAndRemember.mock.calls[0]
+      mockGetContext.mockResolvedValue(remembering([{ role: 'user', content: first[2] }, { role: 'assistant', content: first[3].join('\n\n') }]))
 
       await handlePostback('user1', 'token1', 'action=daily_line_more&line=20', MORNING)
       await handlePostback('user1', 'token1', 'action=daily_line_more&line=18', MORNING)
 
-      const [sameChapter, otherChapter] = mockHandleText.mock.calls.slice(1)
-      expect(sameChapter[2]).toContain(`「${DAILY_LINES[20][0]}」`)
-      expect(sameChapter[4]).toEqual({})
-      expect(otherChapter[4].before).toMatch(/^〈非說所說分第二十一〉原文：/)
+      const [sameChapter, otherChapter] = mockReplyAndRemember.mock.calls.slice(1)
+      expect(sameChapter[3]).toEqual([lineAt(20).note])
+      expect(otherChapter[3][0]).toMatch(/^〈非說所說分第二十一〉原文：/)
+      expect(otherChapter[3][1]).toBe(lineAt(18).note)
     })
 
-    it('多了解這一段 still shows the chapter when memory cannot be read, and leaves the failure to the answer', async () => {
+    it('多了解這一段 still shows the chapter and the note when memory cannot be read', async () => {
       mockGetContext.mockRejectedValue(Object.assign(new Error('Rate exceeded'), { name: 'ProvisionedThroughputExceededException' }))
       jest.spyOn(console, 'warn').mockImplementation(() => {})
 
       await handlePostback('user1', 'token1', 'action=daily_line_more&line=19', MORNING)
 
-      expect(mockHandleText.mock.calls[0][4].before).toMatch(/^〈淨心行善分第二十三〉原文：/)
+      const [passage, note] = mockReplyAndRemember.mock.calls[0][3]
+      expect(passage).toMatch(/^〈淨心行善分第二十三〉原文：/)
+      expect(note).toBe(lineAt(19).note)
     })
 
     it.each(['action=daily_line_next&line=abc', 'action=daily_line_next&line=999', 'action=daily_line_next'])(
@@ -242,11 +237,8 @@ describe('commands', () => {
       const first = await press('action=daily_line')
       mockGetContext.mockResolvedValue(remembering(turnsOf(first)))
       const next = await press(`action=daily_line_next&line=${today.index}`)
-      const explained = [
-        { role: 'user', content: '想多了解這一句：…' },
-        { role: 'assistant', content: '（模型的解釋）' },
-      ]
-      mockGetContext.mockResolvedValue(remembering([...turnsOf(first, next), ...explained]))
+      const explained = await press(`action=daily_line_more&line=${today.index + 1}`)
+      mockGetContext.mockResolvedValue(remembering(turnsOf(first, next, explained)))
 
       const again = await press('action=daily_line')
 
