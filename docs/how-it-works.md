@@ -28,9 +28,11 @@ The second model is used only when there is time for it, and the chat model answ
 Before a reply goes out:
 
 - A reply carrying the model's notes to itself (`<reasoning>`, `<invoke …>`) is asked for once more; a second one becomes the apology.
-- A closing question that makes the person pick one of two readings of their own life (是他們變了，還是你變了) is left off what the chat model wrote. Whether the closing sentence is one is asked of the chat model itself, since 還是 also means "still" and "had better". What the model for worries wrote goes out as written.
+- In light talk, a closing question that makes the person pick one of two readings (是他們變了，還是你變了) is left off. Whether the closing sentence is one is asked of the chat model, since 還是 also means "still" and "had better".
 
-That closing question stays when it may be a question after the person's safety (是想好好睡一場，還是有不想再醒的念頭), which is the one question that must go out. It stays when the sentence has a word about safety in it, and when the reply or the person's last few messages hold a crisis word or pass the check in `lambda/crisis.mjs`; the chat model is also told that such a question is no choice. These are lists of words, so a way of saying it that is on none of them rests on the chat model's answer alone. The question also stays when taking it out would leave almost nothing, or a lead-in with nothing after it.
+Light talk is talk sorted as small talk or the sutra, and 多了解這一段. Talk about worries, and talk that was not sorted (no model for worries, no time, the sorting failed), goes out as written, whichever model wrote it. The reason is one question: after a line that could go either way (好想一睡不醒), the model asks 是想好好睡一場，還是有不想再醒的念頭, which is a choice in form and the one question that must go out. Neither a list of words nor the chat model, asked, could tell it from the rest, so the closing choice is taken off only where that question is not asked. In light talk the reply still stays as written when the closing sentence has a word about safety in it, when the reply or the person's last few messages hold a crisis word or pass the check in `lambda/crisis.mjs`, and when taking the sentence out would leave almost nothing or a lead-in with nothing after it.
+
+Turning the model for worries off (unsetting `WORRIES_MODEL_ANTHROPIC`) therefore also leaves every typed message's reply as written.
 
 The prompt and its demos are the same for everyone, so they are sent as a block Anthropic may keep for a few minutes and bill at a tenth when read again.
 

@@ -177,8 +177,26 @@ describe('chat service', () => {
         expect(mockProvider.ask).toHaveBeenCalledTimes(1)
       })
 
-      it('still takes the closing choice off what the chat model wrote', async () => {
-        sortingAs('A')
+      it.each([
+        ['about worries, when the chat model had to write the reply', 'C'],
+        ['not sorted', new Error('Anthropic ask failed: 529 overloaded_error')],
+        ['sorted as something the bot does not know', '答案：C'],
+      ])('leaves the closing choice in talk that is %s: a question after someone\'s safety is one too', async (_, kind) => {
+        sortingAs(kind)
+        const written = '嗯，累成這樣\n\n是想好好睡一場，還是想的是別的？'
+        mockProvider.chatCompletion.mockReset()
+        if (kind === 'C') mockProvider.chatCompletion.mockRejectedValueOnce(new Error('Anthropic chat failed: 529 overloaded_error'))
+        mockProvider.chatCompletion.mockResolvedValue({ text: written })
+        jest.spyOn(console, 'warn').mockImplementation(() => {})
+
+        await handleText('user1', 'token1', '最近真的好累', Date.now())
+
+        expect(mockReplyMessage).toHaveBeenCalledWith('token1', written)
+        expect(mockProvider.ask).toHaveBeenCalledTimes(1)
+      })
+
+      it.each(['A', 'B'])('takes the closing choice off light talk (sorted as %s)', async (kind) => {
+        sortingAs(kind)
         const sort = mockProvider.ask
         mockProvider.ask = jest.fn(async (question) => (question.startsWith(SORTS) ? sort(question) : '是'))
         mockProvider.chatCompletion.mockResolvedValue({ text: '真的，難得的好天氣\n\n是有出去走走，還是在家曬太陽' })
@@ -213,24 +231,34 @@ describe('chat service', () => {
     })
 
     // Replies the model wrote for made-up conversations (2026-11-25).
-    describe('a closing question that offers two choices', () => {
-      const JUDGES = '下面是一段聊天裡對方剛說的話'
+    describe('a closing question that offers two choices, in light talk', () => {
+      const SORTS = '你在替一個聊天機器人分派訊息'
+      const JUDGES = '下面是一則聊天回覆的最後一句'
+      // The talk is sorted as small talk, and the chat model judges the closing sentence as `answer`.
       const judgedAs = (answer) => {
+        mockProvider.answersWorries = true
         mockProvider.answersQuestions = true
         mockProvider.ask = jest.fn(async (question) => {
-          if (!question.startsWith(JUDGES)) throw new Error('not asked to sort the talk here')
+          if (question.startsWith(SORTS)) return 'A'
+          if (!question.startsWith(JUDGES)) throw new Error('a question the bot does not ask')
           if (answer instanceof Error) throw answer
           return answer
         })
       }
-      const sentFor = async (modelText, userText = '最近跟身邊的人都有點疏遠') => {
+      const sentFor = async (modelText, userText = '欸 今天天氣有夠好') => {
         mockProvider.chatCompletion.mockResolvedValue({ text: modelText })
-        await handleText('user1', 'token1', userText, 1795270000000)
+        await handleText('user1', 'token1', userText, Date.now())
         return mockReplyMessage.mock.calls.at(-1)[1]
       }
-      const judged = () => mockProvider.ask.mock.calls.map(([question]) => question.match(/最後一句：「([\s\S]*)」$/)[1])
+      // The closing sentences the chat model was asked about.
+      const judged = () =>
+        mockProvider.ask.mock.calls
+          .map(([question]) => question)
+          .filter((question) => question.startsWith(JUDGES))
+          .map((question) => question.match(/最後一句：「([\s\S]*)」$/)[1])
 
       afterEach(() => {
+        delete mockProvider.answersWorries
         delete mockProvider.answersQuestions
         delete mockProvider.ask
       })
@@ -250,7 +278,7 @@ describe('chat service', () => {
 
         await sentFor('那就難熬了\n\n窗戶看得到外面嗎，還是被困在裡面', '哈哈對啊')
 
-        expect(mockSaveTurn).toHaveBeenCalledWith('user1', '哈哈對啊', '那就難熬了', 1795270000000)
+        expect(mockSaveTurn).toHaveBeenCalledWith('user1', '哈哈對啊', '那就難熬了', expect.any(Number))
       })
 
       it('goes with the question it carries on, when that one only offered the first choice', async () => {
@@ -281,14 +309,6 @@ describe('chat service', () => {
         expect(await sentFor('聽起來很悶\n\n是他們變了，還是你變了？🙂')).toBe('聽起來很悶')
       })
 
-      it('is judged with what the person just said in view', async () => {
-        judgedAs('否')
-
-        await sentFor('那就難熬了\n\n窗戶看得到外面嗎，還是被困在裡面', '今天\n被關在會議室一整天')
-
-        expect(mockProvider.ask.mock.calls[0][0]).toContain('對方剛說：「今天 被關在會議室一整天」')
-      })
-
       it('leaves an open question before it in place', async () => {
         judgedAs('是')
 
@@ -308,10 +328,22 @@ describe('chat service', () => {
 
       it('stays, unasked, with a provider that takes no short questions', async () => {
         mockProvider.ask = jest.fn()
-        const written = '那就難熬了\n\n窗戶看得到外面嗎，還是被困在裡面'
+        const written = '這一段在講心抓不住\n\n你是想多聽這句，還是想聊聊最近的事'
+        mockProvider.chatCompletion.mockResolvedValue({ text: written })
 
-        expect(await sentFor(written)).toBe(written)
+        await handleText('user1', 'token1', '這段是什麼意思', Date.now(), { worries: false })
+
+        expect(mockReplyMessage).toHaveBeenCalledWith('token1', written)
         expect(mockProvider.ask).not.toHaveBeenCalled()
+      })
+
+      it('is judged when the caller says the talk is light, as the button under a daily line does', async () => {
+        judgedAs('是')
+        mockProvider.chatCompletion.mockResolvedValue({ text: '這一段在講心抓不住\n\n你是想多聽這句，還是想聊聊最近的事' })
+
+        await handleText('user1', 'token1', '這段是什麼意思', Date.now(), { worries: false })
+
+        expect(mockReplyMessage).toHaveBeenCalledWith('token1', '這一段在講心抓不住')
       })
 
       it('stays when the chat model could not be asked', async () => {
@@ -331,7 +363,7 @@ describe('chat service', () => {
         judgedAs('是')
 
         expect(await sentFor(written)).toBe(written)
-        expect(mockProvider.ask).not.toHaveBeenCalled()
+        expect(judged()).toEqual([])
       })
 
       it.each([
@@ -349,7 +381,7 @@ describe('chat service', () => {
         mockGetContext.mockResolvedValue({ summary: null, previousSession: null, recentTurns })
 
         expect(await sentFor(written, userText)).toBe(written)
-        expect(mockProvider.ask).not.toHaveBeenCalled()
+        expect(judged()).toEqual([])
       })
     })
 
