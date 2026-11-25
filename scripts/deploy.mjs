@@ -48,7 +48,10 @@ const out = join(mkdtempSync(join(tmpdir(), 'animitta-')), 'self-test.json')
 aws('lambda', 'invoke', '--function-name', FUNCTION, '--cli-binary-format', 'raw-in-base64-out', '--payload', '{"selfTest":true}', out, '--query', 'StatusCode', '--output', 'text')
 const result = JSON.parse(JSON.parse(readFileSync(out, 'utf8')).body)
 console.log('Self-test:', result)
-if (result.signature !== 'ok' || (result.anthropic !== 'ok' && result.bedrock !== 'ok')) {
+const answers = result.anthropic === 'ok' || result.bedrock === 'ok'
+// The model for worries has no stand-in at deploy time: failing, every worry would go to the chat model unnoticed.
+const worriesAnswered = ['ok', 'off'].includes(result.worries)
+if (result.signature !== 'ok' || !answers || !worriesAnswered) {
   console.error('The self-test failed: the deploy is live, so look at it now.')
   process.exit(1)
 }

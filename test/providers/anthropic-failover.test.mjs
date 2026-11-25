@@ -74,6 +74,21 @@ describe('AnthropicProvider when Anthropic fails', () => {
     expect(body).not.toHaveProperty('model')
   })
 
+  it('sends the backup the system text whole, without the mark that is Anthropic\'s own', async () => {
+    mockFetch.mockResolvedValue(failed(529, 'overloaded_error'))
+    backup.send.mockResolvedValueOnce(reply('備援的回覆'))
+    const provider = new AnthropicProvider({ backup, retryPauseMs: 0 })
+
+    await provider.chatCompletion([
+      { role: 'system', content: '提示詞', sameForEveryone: true },
+      { role: 'system', content: '這個人的摘要' },
+      { role: 'user', content: '你好' },
+    ])
+
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body).system[0].cache_control).toEqual({ type: 'ephemeral' })
+    expect(backup.send.mock.calls[0][1].system).toBe('提示詞\n\n這個人的摘要')
+  })
+
   it('gives the apology instead of the backup when Anthropic says the bot is over its rate limit', async () => {
     mockFetch.mockResolvedValueOnce(failed(429, 'rate_limit_error'))
     const provider = new AnthropicProvider({ backup, retryPauseMs: 0 })

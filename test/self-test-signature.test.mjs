@@ -2,6 +2,8 @@ import { describe, it, expect, jest } from '@jest/globals'
 
 const mockVerifySignature = jest.fn()
 jest.unstable_mockModule('../lambda/line.mjs', () => ({ verifySignature: mockVerifySignature }))
+// The self-test sorts with the bot's own question; that is not what is tried here.
+jest.unstable_mockModule('../lambda/services/chat.mjs', () => ({ sortTalk: jest.fn() }))
 
 const { selfTest } = await import('../lambda/self-test.mjs')
 

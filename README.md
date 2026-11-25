@@ -58,7 +58,7 @@ flowchart TB
 ```
 
 - **程式**：Node.js 22，跑在 AWS Lambda（[`lambda/`](lambda/)），沒有額外的套件依賴。
-- **AI**：Anthropic 的 Claude，預設模型是 Claude Haiku 4.5。也可以換成 OpenAI。
+- **AI**：Anthropic 的 Claude，預設模型是 Claude Haiku 4.5，聊心事時可以另外指定一個模型。也可以換成 OpenAI。
 - **記憶**：DynamoDB，存最近幾輪對話和一段 AI 整理的重點。
 - **語音**：錄音暫存在 S3，由 Amazon Transcribe（`zh-TW`）轉成文字。
 - **基礎設施**：AWS CDK（[`cdk/`](cdk/)），用 `npm run deploy` 一次部署。
@@ -102,10 +102,9 @@ flowchart TB
    node scripts/setup-richmenu.mjs
    ```
 
-5. 部署。第一行指令替 Lambda 先建好 log group，因為警報用的 metric filter 要掛在它上面，stack 卻不保證它先建好。`npx cdk bootstrap` 只在這個帳號和區域第一次用 CDK 時需要。`npm run deploy` 只肯在最新、沒有未提交改動的 main 上執行，部署完會跑一次自我檢查。
+5. 部署。`npx cdk bootstrap` 只在這個帳號和區域第一次用 CDK 時需要。`npm run deploy` 只肯在最新、沒有未提交改動的 main 上執行，部署完會跑一次自我檢查。
 
    ```bash
-   aws logs create-log-group --log-group-name /aws/lambda/animitta
    npx cdk bootstrap
    npm run deploy
    ```
@@ -124,6 +123,7 @@ flowchart TB
 
 - `LLM_PROVIDER`：用哪一家 AI。沒設定時是 `openai`，`.env.example` 設成 `anthropic`。
 - `CHAT_MODEL_ANTHROPIC`：聊天用的 Claude 模型，預設 `claude-haiku-4-5-20251001`。
+- `WORRIES_MODEL_ANTHROPIC`、`WORRIES_EFFORT_ANTHROPIC`：聊心事時改用的 Claude 模型和它的 effort，例如 `claude-sonnet-5-5` 和 `high`。不設就全部由聊天用的模型回答。怎麼分辨心事，見 [docs/how-it-works.md](docs/how-it-works.md#which-model-answers)。
 - `CONVERSATION_TTL_DAYS`：幾天沒互動就清空記憶，預設 30。「關於」會引用，log 的保存期限也跟著它。
 - `VOICE_MINUTES_PER_MONTH`：每人每月能傳的語音分鐘數，預設 30。「關於」會引用。
 - `VOICE_MINUTES_ALL_USERS_PER_MONTH`：所有人合計的每月語音分鐘數，預設 1500，用來限制 Transcribe 的帳單。

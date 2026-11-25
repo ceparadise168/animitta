@@ -36,7 +36,8 @@ global.fetch = async (url, init) => {
   if (String(url).startsWith('https://api.line.me/')) return ok({})
   const body = JSON.parse(init.body)
   if (body.system) {
-    chatRequests.push(body)
+    // The system text as the model reads it, whether sent whole or in blocks.
+    chatRequests.push({ ...body, system: [body.system].flat().map((part) => part.text ?? part).join('') })
     await llm.beforeChatReply()
     return ok({ stop_reason: 'end_turn', content: [{ type: 'text', text: '（模型的回覆）' }] })
   }

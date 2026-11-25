@@ -12,6 +12,36 @@ The [README](../README.md) is the overview, in Traditional Chinese. This page is
 - Stickers are answered: LINE's sticker keywords (and the text on message stickers) go to the model
 - Photos, videos, files, locations and audio links from outside LINE get a short "type or send voice instead" reply, which is remembered
 
+## Which model answers
+
+One model answers everything unless `WORRIES_MODEL_ANTHROPIC` is set. With it set, the chat model first sorts each message (typed, spoken, or a sticker) as small talk, a question about the sutra, or worries, with the last three exchanges in view (the session before included) so that a bare 對啊 stays with what it answers. A line with not wanting to live in it counts as worries however lightly it is said, and so does any answer from the sorting with a C in it. Worries go to that second model, run at `WORRIES_EFFORT_ANTHROPIC`; small talk and the sutra stay with the chat model. 多了解這一段 is a question about the sutra by construction and is not sorted.
+
+The model for worries reads the same prompt with two additions (`lambda/prompt.mjs`): a paragraph telling it not to hold back too far, and a sentence saying that a sticker with 想死 written on it is said plainly.
+
+The second model is used only when there is time for it, and the chat model answers whenever it cannot:
+
+- A message that could not be sorted is answered by the chat model.
+- The model for worries gets half of the time left, 20 seconds at most, so the chat model always keeps at least half. A message is not sorted at all when that half would be under 10 seconds once the 3 for sorting are gone, which is with less than 23 seconds left (a long voice message, a late webhook).
+- When the model for worries fails, refuses, or is still writing when its time is up, the chat model answers instead (logged as `The model for worries did not answer`). No alarm is raised for this. A deploy's self-test sorts a line with the bot's own question and time limit and asks that model too, and does not pass when either fails, so a wrong name is found at deploy time.
+- The backup on Amazon Bedrock is the chat model only, so it never stands in for the other one.
+
+Before a reply goes out:
+
+- A reply carrying the model's notes to itself (`<reasoning>`, `<invoke …>`) is asked for once more. A second one from the model for worries hands the message to the chat model; a second one from the chat model becomes the apology.
+- In talk sorted as light, a closing question that makes the person pick one of two readings (是他們變了，還是你變了) is left off. Whether the closing sentence is one is asked of the chat model, since 還是 also means "still" and "had better".
+
+Light talk is talk the sorting called small talk or the sutra, and 多了解這一段. Talk about worries, and talk that was not sorted (no model for worries, no time, the sorting failed), goes out as written, whichever model wrote it. The reason is one question: after a line that could go either way (好想一睡不醒), the model asks 是想好好睡一場，還是有不想再醒的念頭, which is a choice in form and the one question that must go out. Neither a list of words nor the chat model, asked, could tell it from the rest for certain, so this rests first on the sorting, which is a model's answer and can be wrong.
+
+Behind the sorting, in light talk:
+
+- Only one shape is cut: a choice whole in the closing sentence, standing in a paragraph of its own or after a sentence that ended. A closing 還是… that carries on from the question before it stays, since that question may be the one about their safety.
+- The reply stays as written when the closing sentence has a word about safety or leaving in it, when the reply or the person's last few messages (the session before included) hold a crisis word or pass the check in `lambda/crisis.mjs`, and when the summary says it in plain words. These are lists; a way of saying it that is on none of them gets past this layer.
+- It also stays when the rest would not be a reply by itself: almost nothing left, a lead-in on the list of those (我想問你一件事。), a bracket left open.
+
+Turning the model for worries off (unsetting `WORRIES_MODEL_ANTHROPIC`) therefore also leaves every typed message's reply as written.
+
+The prompt and its demos are the same for everyone, so they are sent as a block Anthropic may keep for a few minutes and bill at a tenth when read again.
+
 ## 每日一句 (a line a day)
 
 每日一句 (a line a day) shows one line of the sutra, word for word with its chapter, in the sutra's order (27 lines; those that read as a rebuke when shown alone are left out). The first press on a Taipei day shows that day's line, the same for everyone. Pressing again reads on from the last line read that day, skipping any line the bot remembers showing, so a press never goes back, never repeats a remembered line, and is never a fresh draw. Only the day's line carries the 每日一句 title. It is remembered like the casual-chat opener, and if memory cannot be read the day's line still goes out.
@@ -70,7 +100,7 @@ The backup is off unless `BEDROCK_MODEL_ID` is set (for example `jp.anthropic.cl
 aws lambda invoke --function-name animitta --payload '{"selfTest":true}' --cli-binary-format raw-in-base64-out out.json
 ```
 
-It asks Anthropic and the backup a one-word question and checks a LINE signature with the real secret, then writes `{"anthropic":"ok","bedrock":"ok","signature":"ok"}` or the failure messages. Only a direct invoke runs it; requests through the webhook URL carry `requestContext` and never do.
+It asks the chat model, the model for worries when there is one, and the backup a one-word question and checks a LINE signature with the real secret, then writes `{"anthropic":"ok","worries":"off","bedrock":"ok","signature":"ok"}` or the failure messages. Only a direct invoke runs it; requests through the webhook URL carry `requestContext` and never do.
 
 ## Alerts
 

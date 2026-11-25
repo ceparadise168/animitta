@@ -1,7 +1,7 @@
 export class LlmProvider {
   /**
    * @param {Array<{role: string, content: string}>} messages
-   * @param {{signal?: AbortSignal}} [options] aborts the request when it fires
+   * @param {{signal?: AbortSignal, worries?: boolean}} [options] signal aborts the request when it fires
    * @returns {Promise<{text: string}>}
    */
   async chatCompletion(messages, options) {
@@ -10,5 +10,26 @@ export class LlmProvider {
 
   async summarize(existingSummary, turns) {
     throw new Error('summarize not implemented')
+  }
+
+  /**
+   * A short question answered in a word. Callers go on without the answer
+   * when it fails.
+   * @param {string} question
+   * @param {{signal?: AbortSignal}} [options]
+   * @returns {Promise<string>}
+   */
+  async ask(question, options) {
+    throw new Error('ask not implemented')
+  }
+
+  /** Whether ask() is answered, so callers do not put a question to a provider that has none. */
+  get answersQuestions() {
+    return false
+  }
+
+  /** Whether worries go to a model of their own (chatCompletion's worries option). */
+  get answersWorries() {
+    return false
   }
 }
