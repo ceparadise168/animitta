@@ -121,7 +121,7 @@ describe('alert triage summary', () => {
     const step = explain(cause)
 
     expect(cause).toMatchObject({ kind: 'provider', service: 'Anthropic', op: 'summary', status: 'no response' })
-    expect(step.users).toBe('使用者有收到回覆，只是記憶整理沒做完，下一則訊息會再試。')
+    expect(step.users).toBe('使用者有收到回覆，只是記憶整理沒做完，之後的訊息會再試。')
     expect(step.what).toBe('Anthropic 整理記憶時失敗（no response）：服務暫時塞車或故障。')
   })
 
@@ -144,7 +144,7 @@ describe('alert triage summary', () => {
       'Anthropic summary failed: unreadable reply',
     ]) {
       const step = explain(causeOf(line))
-      expect(step.users).toBe('使用者有收到回覆，只是記憶整理沒做完，下一則訊息會再試。')
+      expect(step.users).toBe('使用者有收到回覆，只是記憶整理沒做完，之後的訊息會再試。')
       expect(step.what).not.toMatch(/\d+ 秒/)
     }
   })
