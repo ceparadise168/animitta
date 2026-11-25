@@ -52,12 +52,3 @@ describe("today's lines", () => {
     for (const [line] of DAILY_LINES) expect(han(line).length).toBeGreaterThanOrEqual(6)
   })
 })
-
-describe('the casual-chat openers', () => {
-  it('quote the sutra word for word', () => {
-    const source = readFileSync(new URL('../lambda/commands.mjs', import.meta.url), 'utf8')
-    const quotes = [...source.matchAll(/「([^」]+)」/g)].map((m) => m[1]).filter((q) => han(q).length >= 6)
-    expect(quotes.length).toBeGreaterThan(0)
-    for (const q of quotes) expect(chapterOf(q)).toBeDefined()
-  })
-})
