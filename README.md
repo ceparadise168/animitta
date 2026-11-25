@@ -1,5 +1,39 @@
 # Animitta 無相界
 
+## 給從 LINE 點進來的你
+
+這裡是無相界的程式碼。「關於」裡寫的每一句，都能在這裡找到是哪段程式做的。
+
+### 你傳的訊息會經過哪裡
+
+- **LINE**：訊息先送到 LINE，再轉給無相界。
+- **Amazon 的東京機房（AWS）**：無相界的程式跑在這裡，記憶也存在這裡的資料庫。
+- **AI 服務**：要產生回覆，你傳的文字會交給「關於」裡寫的 AI 服務處理，現在是 Anthropic 的 Claude。
+- **Amazon 語音辨識**：只有傳語音時才會用到。
+
+### 「關於」裡的每一句
+
+- **對話傳送與存放都加密**：對外的連線都走 https。資料庫（DynamoDB）依 [AWS 的預設](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/EncryptionAtRest.html)一律加密存放；語音暫存區（S3）在 [`cdk/lib/animitta-stack.ts`](cdk/lib/animitta-stack.ts) 設了加密。
+- **記憶只用來接話**：記憶只會在產生回覆、整理成重點的時候交給 AI 服務（[`lambda/services/chat.mjs`](lambda/services/chat.mjs)、[`lambda/services/memory.mjs`](lambda/services/memory.mjs)）。
+- **30 天未互動自動清空**：30 天沒來聊天，對話和重點都會到期。還在聊的話，比較早的對話會被整理成一段重點，這段重點每聊一次就再延 30 天，所以想全部清掉，請按「清除記憶」。到期的資料程式就不再讀，資料庫實際刪掉可能再晚幾天（[`lambda/services/memory.mjs`](lambda/services/memory.mjs)）。
+- **隨時按「清除記憶」**：刪掉你所有的對話和重點（同一個檔案裡的 `clearMemory`）。
+- **不用於訓練**：Anthropic 的[商業條款](https://www.anthropic.com/legal/commercial-terms)寫明「Anthropic may not train models on Customer Content from Services」，也就是不拿 API 收到的內容訓練模型。
+- **語音經 Amazon 轉文字後即刪**：轉完就把錄音和 Amazon 的轉錄檔刪掉；萬一沒刪到，暫存區設了一天到期，會自動清掉（[`lambda/services/transcribe.mjs`](lambda/services/transcribe.mjs)）。轉出來的文字會跟你打的字一樣，記進記憶。AWS 帳號如果沒有關閉「讓 Amazon 用內容改善 AI 服務」，語音會自動暫停、不送出（[`lambda/services/ai-opt-out.mjs`](lambda/services/ai-opt-out.mjs)）。
+- **每月上限 30 分鐘**：用量只記秒數，為了把每個月的上限算準，會留 40 天，清除記憶不會刪到它（[`lambda/services/voice.mjs`](lambda/services/voice.mjs)）。
+
+另外，出錯時寫下的紀錄不會有你打的字，紀錄也只留 30 天（[`lambda/services/chat.mjs`](lambda/services/chat.mjs)）。
+
+### 有兩件事，程式碼證明不了
+
+- **存著的記憶，我技術上看得到**：資料庫在我的 AWS 帳號裡。我承諾不看；修問題時只看有幾筆，不看內容。
+- **你沒辦法從外面確認，線上跑的就是這一版**：我的做法是只部署這裡 main 分支上的版本。GitHub 的自動部署只接受 main，而且要我按核准（[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)）；從電腦部署的指令也會先檢查（[`scripts/deploy.mjs`](scripts/deploy.mjs)）。不過這些關卡都由我掌握，所以終究是我的承諾。
+
+### 想做一個自己的 bot
+
+歡迎參考，程式碼用 MIT 授權。要自己準備 AWS 帳號、LINE 官方帳號（Messaging API）和 Anthropic 的 API key；步驟在下面英文的 [Quick Start](#quick-start)，fork 之後至少有兩個地方要先改，那裡也有寫。
+
+---
+
 A LINE Bot for free-form conversation through a Diamond Sutra (金剛經) lens. It lets people chat naturally first — venting, wondering, asking practical questions, or seeking Buddhist insight — and brings scripture in only when it helps.
 
 > 凡所有相，皆是虛妄；凡所有光，皆入視界。
@@ -20,22 +54,23 @@ A LINE Bot for free-form conversation through a Diamond Sutra (金剛經) lens. 
 ## Architecture
 
 ```
-LINE App → Lambda Function URL → Lambda (Node.js 22.x) → OpenAI / Anthropic
-                                              ↕
-                                        DynamoDB (memory)
+LINE App → Lambda Function URL → Lambda (Node.js 22.x) → Anthropic (Claude) or OpenAI
+                                    ↕                ↕
+                          DynamoDB (memory)   S3 + Amazon Transcribe (voice)
 ```
 
 - **Lambda**: Thin handler → chat service → pluggable LLM provider
 - **DynamoDB**: Conversation turns (sliding window) + a compressed summary per user
+- **S3 + Amazon Transcribe**: Voice messages, deleted once each job ends
 - **CDK**: Infrastructure as Code, one-command deploy
 - **Dual LLM**: Switch between OpenAI and Anthropic via env var
 
 ## Features
 
 - LINE webhook signature verification (HMAC-SHA256); every event in a webhook is handled
-- Rich Menu with 3 buttons: 隨意聊聊 (casual chat), 清除記憶 (clear memory), 關於 (about)
-- 每日一句 (a line a day): one line of the sutra, word for word with its chapter, the same for everyone on a Taipei day and in the sutra's order (27 lines; those that read as a rebuke when shown alone are left out), so pressing again is never a fresh draw. It is remembered like the casual-chat opener. Under it, two Quick Reply buttons: 多了解這一段 sends the whole chapter as it reads, then the model's plain explanation (the passage never comes from the model, which mixed up who said what when it retold it); 再給一句 brings the next line in the sutra's order, again with both buttons. Buttons go only under these fixed lines, never under chat replies. The handler answers the postbacks `action=daily_line`, `action=daily_line_more&line=N` and `action=daily_line_next&line=N`, and the typed `@每日一句`; the rich menu has no button for it yet
-- The Diamond Sutra is read from its text, not from the model's memory: `lambda/diamond-sutra.json` holds the whole sutra: 鳩摩羅什's translation in the circulated text most people recite (流通本, from 佛教城 book.bfnn.org/books/0040), in 32 chapters with 昭明太子's titles. The lookup reads 即/則, 恒/恆, 暗/闇 and 繞/遶 as one character, so someone reciting another printing still finds the chapter. When a message quotes five or more characters of it (four for its best-known short phrases such as 法尚應捨), names a chapter (第十四分在講什麼, 離相寂滅分), asks about a topic (四句偈, or 忍辱 next to a word about the sutra), or asks about a line the bot just quoted (這句出自哪裡), that chapter (at most two) goes into the prompt. Everyday words the sutra also has (不可思議, 全世界所有, 拿到第一分) count only next to a word about the sutra, and the note tells the model the chapter is the program's guess, to use only if the person is asking about the sutra. The whole text is not put in the prompt: measured on 2026-11-22, that answered worse at twice the input. The library lines in the prompt are tested to be the text word for word
+- Rich Menu with 4 buttons, set up by `scripts/setup-richmenu.mjs`: 隨意聊聊 (casual chat), 每日一句 (a line a day), 清除記憶 (clear memory), 關於 (about)
+- 每日一句 (a line a day): one line of the sutra, word for word with its chapter, the same for everyone on a Taipei day and in the sutra's order (27 lines; those that read as a rebuke when shown alone are left out), so pressing again is never a fresh draw. It is remembered like the casual-chat opener. Under it, two Quick Reply buttons: 多了解這一段 sends the whole chapter as it reads, then the model's plain explanation (the passage never comes from the model, which mixed up who said what when it retold it); 再給一句 brings the next line in the sutra's order, again with both buttons. Buttons go only under these fixed lines, never under chat replies. The handler answers the postbacks `action=daily_line`, `action=daily_line_more&line=N` and `action=daily_line_next&line=N`, and the typed `@每日一句`. The menu's 每日一句 button sends `action=daily_line` and closes the menu
+- The Diamond Sutra is read from its text, not from the model's memory: `lambda/diamond-sutra.json` holds the whole sutra: 鳩摩羅什's translation in the circulated text most people recite (流通本, from 報佛恩網's 般若文海, book.bfnn.org/books/0040.htm), in 32 chapters with 昭明太子's titles. The lookup reads 即/則, 恒/恆, 暗/闇 and 繞/遶 as one character, so someone reciting another printing still finds the chapter. When a message quotes five or more characters of it (four for its best-known short phrases such as 法尚應捨), names a chapter (第十四分在講什麼, 離相寂滅分), asks about a topic (四句偈, or 忍辱 next to a word about the sutra), or asks about a line the bot just quoted (這句出自哪裡), that chapter (at most two) goes into the prompt. Everyday words the sutra also has (不可思議, 全世界所有, 拿到第一分) count only next to a word about the sutra, and the note tells the model the chapter is the program's guess, to use only if the person is asking about the sutra. The whole text is not put in the prompt: measured on 2026-11-22, that answered worse at twice the input. The library lines in the prompt are tested to be the text word for word
 - Crisis: the prompt gives 1925 and 1995 (both 24-hour) first. Both can be called at any hour, but neither always picks up, so the bot says to try the other. When the AI service fails on a message that talks of ending a life, the apology still gives them with 119/110. Since that only happens in an outage, the check leans toward hearing it: a phrase counts unless that very occurrence is a known everyday use (笑到想死, 想死你了, 跳樓大拍賣, 規劃自己), and nothing is deleted from the message before looking. News, quoting someone else and 物價高根本活不下去 therefore also get the numbers in an outage; lines that could go either way (想消失, 活著沒意義) are left to the model. The prompt itself treats 累到想死 and the like as everyday talk and asks when it cannot tell. Before deploying a prompt change, run `node scripts/check-crisis-replies.mjs` (real model, about US$0.01 a reply)
 - Someone low for a long while may be told once of real people to talk to: community mental health centres and health bureaus, and 衛福部's free counselling for 15–45-year-olds, which drops out of the prompt by itself on 2027-01-01 because the program is announced only to the end of 2026
 - Typing indicator while the LLM writes the reply
@@ -57,10 +92,12 @@ LINE App → Lambda Function URL → Lambda (Node.js 22.x) → OpenAI / Anthropi
 - Node.js 22+
 - AWS CLI configured with appropriate permissions
 - LINE Messaging API channel (Channel Access Token + Channel Secret)
-- OpenAI API key (and/or Anthropic API key)
+- Anthropic API key (or an OpenAI API key with `LLM_PROVIDER=openai`)
 - The AWS account opted out of AI service improvement, through an AWS Organizations AI services opt-out policy. 關於 tells users a voice recording is deleted once transcribed, which holds only then; without it voice stays paused. Check with `aws organizations describe-effective-policy --policy-type AISERVICES_OPT_OUT_POLICY`, which should show `optOut`
 
 ### Setup
+
+These are the steps for Eric's own bot. `npm run deploy` refuses any origin but github.com/ceparadise168/animitta, and the GitHub deploy role in `cdk/lib/animitta-stack.ts` trusts only this repository's `production` environment, so a fork changes both first. The stack also expects the account to have GitHub's OIDC provider (`token.actions.githubusercontent.com`) already: it imports it rather than creating it.
 
 ```bash
 # Clone and install
@@ -87,7 +124,7 @@ node scripts/setup-richmenu.mjs
 See `.env.example` for all available configuration options.
 
 Key variables:
-- `LLM_PROVIDER`: `openai` or `anthropic`
+- `LLM_PROVIDER`: `anthropic` (what runs, as in `.env.example`) or `openai` (what the code falls back to when it is unset)
 - `CHAT_MODEL_OPENAI`: Model for conversation (e.g., `gpt-4.1-mini`)
 - `BEDROCK_MODEL_ID`: The backup for Anthropic, off unless set (for example `jp.anthropic.claude-haiku-4-5-20251001-v1:0`). A limit Eric set himself in the Console never goes to the backup. It must be a `jp.` profile of the same model as `CHAT_MODEL_ANTHROPIC`, or synth fails, because 關於 tells users it is the same model, run in Japan. Before it can answer, someone with admin rights submits Anthropic's first-time-use form in the Bedrock console and sends one message in the playground, which also subscribes the account through AWS Marketplace; then the self-test shows `"bedrock":"ok"`
 - `MAX_RECENT_TURNS`: Number of recent conversation turns to keep (default: 5)
@@ -99,25 +136,34 @@ Key variables:
 
 ```
 animitta/
-├── cdk/                    # AWS CDK infrastructure
+├── cdk/                        # AWS CDK infrastructure
 │   ├── bin/app.ts
 │   └── lib/animitta-stack.ts
-├── lambda/
-│   ├── index.mjs           # Lambda handler (routing)
-│   ├── line.mjs            # LINE API helpers
-│   ├── prompt.mjs          # System prompt + scripture library
-│   ├── commands.mjs        # Rich Menu command handlers
+├── lambda/                     # What runs on Lambda (no dependencies of its own)
+│   ├── index.mjs               # Webhook handler: signature check, routing
+│   ├── line.mjs                # LINE API helpers
+│   ├── commands.mjs            # Rich Menu commands: 隨意聊聊, 每日一句, 清除記憶, 關於
+│   ├── prompt.mjs              # System prompt, scripture library, example conversations
+│   ├── crisis.mjs              # Hotlines in the apology when the AI service fails
+│   ├── sutra.mjs               # Finds the chapter a message is about; 每日一句
+│   ├── diamond-sutra.json      # The whole sutra, 32 chapters
+│   ├── self-test.mjs           # {"selfTest":true}: AI service and signature check
 │   ├── services/
-│   │   ├── chat.mjs        # Chat orchestration
-│   │   └── memory.mjs      # DynamoDB conversation memory
+│   │   ├── chat.mjs            # Chat orchestration
+│   │   ├── memory.mjs          # DynamoDB conversation memory and retention
+│   │   ├── voice.mjs           # Voice messages and monthly minutes
+│   │   ├── transcribe.mjs      # Amazon Transcribe, deleting the files after
+│   │   └── ai-opt-out.mjs      # Reads the AWS AI services opt-out before each recording
 │   └── providers/
-│       ├── base.mjs        # LLM provider interface
-│       ├── openai.mjs      # OpenAI implementation
-│       └── anthropic.mjs   # Anthropic implementation
-├── test/                   # Jest test suite
-├── scripts/
-│   └── setup-richmenu.mjs  # One-time Rich Menu setup
-└── docs/                   # Design specs and plans
+│       ├── base.mjs            # LLM provider interface
+│       ├── index.mjs           # Picks the provider from LLM_PROVIDER
+│       ├── anthropic.mjs       # Anthropic, with the Bedrock backup
+│       └── openai.mjs          # OpenAI
+├── ops/alert-triage/           # Reads the lines behind an alarm and emails the cause
+├── scripts/                    # Deploy, rich menu, workflow and crisis checks, evals
+├── test/                       # Jest test suite
+├── .github/workflows/          # test on PRs; deploy after Eric approves
+└── docs/                       # Design notes and plans from along the way
 ```
 
 ## Customization
@@ -128,11 +174,11 @@ Edit `lambda/prompt.mjs` — the `SYSTEM_PROMPT` defines the bot's personality, 
 
 ### Adding Scripture
 
-Add quotes to the `<經文庫>` section in `prompt.mjs`, organized by theme. The bot selects relevant quotes based on conversation context.
+Add quotes to the `<經文庫 — 純金剛經>` section in `prompt.mjs`, under a theme and with the chapter each comes from. Each must be that chapter's text in `lambda/diamond-sutra.json` word for word, punctuation aside; `test/sutra-text.test.mjs` checks it. The bot selects relevant quotes based on conversation context.
 
 ### Switching LLM Provider
 
-Set `LLM_PROVIDER=anthropic` in `.env` and provide `ANTHROPIC_API_KEY`.
+Set `LLM_PROVIDER=openai` in `.env` and provide `OPENAI_API_KEY`. The Bedrock backup works only with `anthropic`.
 
 ## Testing
 
@@ -142,4 +188,4 @@ npm test
 
 ## License
 
-MIT
+The code is MIT (see `LICENSE`). The sutra text in `lambda/diamond-sutra.json`, and the lines quoted from it elsewhere, are 鳩摩羅什's translation from the early fifth century, long in the public domain, and are not covered by the MIT license. This digital text comes from 報佛恩網's 般若文海 (book.bfnn.org/books/0040.htm), which says 「本站資料，歡迎翻印、轉載流通」.
