@@ -205,7 +205,8 @@ async function askAnthropic(op, apiKey, model, body, signal) {
   if (!res.ok) throw await anthropicFailure(op, res)
   try {
     return await res.json()
-  } catch {
+  } catch (err) {
+    if (signal?.aborted) throw err
     throw new Error(`Anthropic ${op} failed: unreadable reply`)
   }
 }
