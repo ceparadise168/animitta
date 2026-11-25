@@ -1,8 +1,8 @@
 import { replyMessage, replyWithQuickReply } from './line.mjs'
-import { clearMemory, RETENTION_DAYS } from './services/memory.mjs'
+import { clearMemory, getContext, RETENTION_DAYS } from './services/memory.mjs'
 import { handleText, replyAndRemember } from './services/chat.mjs'
 import { VOICE_MINUTES_PER_MONTH } from './services/voice.mjs'
-import { DAILY_LINES, askAboutLine, lineAt, lineReply, passageOf, todaysLine } from './sutra.mjs'
+import { DAILY_LINES, askAboutLine, lineAt, lineIn, lineReply, passageOf, showsPassageOf, todaysLine } from './sutra.mjs'
 
 const CASUAL_CHAT_STARTERS = [
   '嗨～今天過得還好嗎？\n想到什麼都可以直接聊。',
@@ -62,8 +62,7 @@ export async function handlePostback(userId, replyToken, data, sentAt) {
     return handleNextLine(userId, replyToken, lineShown(params.get('line'), sentAt), sentAt)
   }
   if (params.get('action') === 'daily_line_more') {
-    const shown = lineShown(params.get('line'), sentAt)
-    return handleText(userId, replyToken, askAboutLine(shown), sentAt, { before: passageOf(shown) })
+    return handleMoreAboutLine(userId, replyToken, lineShown(params.get('line'), sentAt), sentAt)
   }
   if (data === 'confirm:clear') {
     try {
@@ -102,20 +101,52 @@ function lineShown(written, sentAt) {
   return index < DAILY_LINES.length ? lineAt(index) : todaysLine(sentAt)
 }
 
+const PRESSED_TODAYS_LINE = '（按了選單的「每日一句」）'
+const PRESSED_NEXT_LINE = '（按了「再給一句」）'
+
+// What the bot still remembers word for word: this session's turns, and the
+// session before until it is folded into the summary.
+const rememberedTurns = ({ recentTurns, previousSession }) => [...(previousSession?.turns ?? []), ...recentTurns]
+
+// The daily lines shown to this person in what the bot remembers, oldest first.
+function linesSeen(turns) {
+  return turns.flatMap((turn, i) => {
+    const pressed = turn.role === 'user' && [PRESSED_TODAYS_LINE, PRESSED_NEXT_LINE].includes(turn.content)
+    const line = pressed && turns[i + 1]?.role === 'assistant' ? lineIn(turns[i + 1].content) : null
+    return line ? [line] : []
+  })
+}
+
 // Remembered like the casual-chat opener, so whatever the person says next is
-// answered as a reply to the line, with its chapter at hand if they ask.
+// answered as a reply to the line, with its chapter at hand if they ask. Once
+// today's line has been shown, pressing again reads on from the last line shown
+// instead of bringing the same one back (2026-11-25: three presses in six
+// minutes brought one line three times).
 async function handleTodaysLine(userId, replyToken, sentAt) {
   const today = todaysLine(sentAt)
-  return replyAndRemember(userId, replyToken, '（按了選單的「每日一句」）', lineReply(today, { first: true }), sentAt, {
-    quickReply: lineFollowUps(today),
+  const seen = linesSeen(rememberedTurns(await getContext(userId)))
+  const readOn = seen.some(({ index }) => index === today.index)
+  const shown = readOn ? lineAt(seen.at(-1).index + 1) : today
+  return replyAndRemember(userId, replyToken, PRESSED_TODAYS_LINE, lineReply(shown, { first: !readOn }), sentAt, {
+    quickReply: lineFollowUps(shown),
   })
 }
 
 async function handleNextLine(userId, replyToken, shown, sentAt) {
   const next = lineAt(shown.index + 1)
-  return replyAndRemember(userId, replyToken, '（按了「再給一句」）', lineReply(next), sentAt, {
+  return replyAndRemember(userId, replyToken, PRESSED_NEXT_LINE, lineReply(next), sentAt, {
     quickReply: lineFollowUps(next),
   })
+}
+
+// A chapter already shown in what the bot remembers is not sent again: the
+// person has it just above, and the model has it from the lookup either way
+// (2026-11-25: one chapter three times in six minutes).
+async function handleMoreAboutLine(userId, replyToken, shown, sentAt) {
+  const shownBefore = rememberedTurns(await getContext(userId)).some(
+    ({ role, content }) => role === 'assistant' && showsPassageOf(content, shown),
+  )
+  return handleText(userId, replyToken, askAboutLine(shown), sentAt, shownBefore ? {} : { before: passageOf(shown) })
 }
 
 async function handleClearMemory(replyToken) {

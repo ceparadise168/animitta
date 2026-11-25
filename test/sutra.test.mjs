@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals'
-import { passagesFor, passageNote, DAILY_LINES, todaysLine, todaysLineReply, lineAt, lineReply, askAboutLine, passageOf } from '../lambda/sutra.mjs'
+import { passagesFor, passageNote, DAILY_LINES, todaysLine, todaysLineReply, lineAt, lineIn, lineReply, askAboutLine, passageOf } from '../lambda/sutra.mjs'
 import { buildMessages } from '../lambda/prompt.mjs'
 import { EVERYDAY_MESSAGES } from './fixtures/everyday-messages.mjs'
 
@@ -171,12 +171,35 @@ describe('the lines after the day\'s one', () => {
 
   it('show the whole chapter as it reads when 多了解這一段 is pressed', () => {
     const shown = lineAt(17)
-    expect(passageOf(shown)).toBe(`〈一體同觀分第十八〉原文：\n\n${shown.chapter.text}`)
+    expect(passageOf(shown).startsWith(`〈一體同觀分第十八〉原文：\n\n${shown.chapter.text}`)).toBe(true)
+  })
+
+  // The circulated text leaves a speech open where the next chapter carries it on.
+  it('close the speech a chapter leaves open, so the passage does not end mid-quote', () => {
+    expect(passageOf(lineAt(19))).toMatch(/所言善法者，如來說即非善法，是名善法。」$/)
+  })
+
+  const quotesClose = (text) => {
+    let open = false
+    for (const mark of text.match(/[「」]/g) ?? []) {
+      if (mark === '」' && !open) return false
+      open = mark === '「'
+    }
+    return !open
+  }
+  it.each(DAILY_LINES.map((_, i) => [i]))('show a chapter whose quotes all close under line %d', (i) => {
+    expect(quotesClose(passageOf(lineAt(i)))).toBe(true)
   })
 
   it.each(DAILY_LINES.map((_, i) => [i]))('hand the model the right chapter when 多了解這一段 is pressed under line %d', (i) => {
     const shown = lineAt(i)
     expect(passagesFor(askAboutLine(shown))[0].chapter.title).toBe(shown.chapter.title)
+  })
+
+  it('can be told apart from other replies by the line they show', () => {
+    expect(lineIn(lineReply(lineAt(19), { first: true })).index).toBe(19)
+    expect(lineIn(lineReply(lineAt(20))).index).toBe(20)
+    expect(lineIn('是法平等，無有高下，這句我也很喜歡')).toBe(null)
   })
 })
 

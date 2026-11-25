@@ -210,11 +210,12 @@ export function passagesFor(userText, recentTurns = []) {
     .slice(0, MOST_CHAPTERS)
 }
 
-// 每日一句: on a Taipei day everyone gets the same line, going through the
-// sutra in order, so pressing again is never a fresh draw (that would be
-// 抽籤). Each line is the text word for word, with its chapter. Lines that read
-// as a rebuke when shown alone are left out (是人行邪道, and the two that call
-// the reader 凡夫), and so is a second line on giving in a row.
+// 每日一句: on a Taipei day everyone's first line is the same, going through
+// the sutra in order, and pressing again reads on from there, so a press is
+// never a fresh draw (that would be 抽籤). Each line is the text word for word,
+// with its chapter. Lines that read as a rebuke when shown alone are left out
+// (是人行邪道, and the two that call the reader 凡夫), and so is a second line
+// on giving in a row.
 export const DAILY_LINES = [
   ['飯食訖，收衣缽，洗足已，敷座而坐。', 1],
   ['應云何住？云何降伏其心？', 2],
@@ -271,13 +272,29 @@ export function todaysLineReply(now = Date.now()) {
   return lineReply(todaysLine(now), { first: true })
 }
 
+/** The daily line a reply made by lineReply shows, or null for any other reply. */
+export function lineIn(reply) {
+  const index = DAILY_LINES.findIndex(([line]) => reply.includes(`「${line}」`))
+  return index < 0 ? null : lineAt(index)
+}
+
 // 多了解這一段 first shows the whole chapter as it reads, so the passage never
 // comes from the model: asked to retell it, the model mixed up who said what
 // in 4 of 8 tries (2026-11-23). Then the model explains it. The line goes into
 // the question as a quote, so the lookup above hands the model the chapter too.
-export function passageOf({ chapter }) {
-  return `〈${chapter.title}〉原文：\n\n${chapter.text}`
+const passageHeading = ({ chapter }) => `〈${chapter.title}〉原文：`
+
+// The circulated text opens each paragraph of a long speech with 「 and closes
+// it only where the speech ends, often in a later chapter. Shown on its own, a
+// chapter closes what it leaves open.
+const closingTheSpeech = (text) => (text.match(/[「」]/g)?.at(-1) === '「' ? `${text}」` : text)
+
+export function passageOf(shown) {
+  return `${passageHeading(shown)}\n\n${closingTheSpeech(shown.chapter.text)}`
 }
+
+/** Whether a reply the bot sent showed this line's chapter, as 多了解這一段 does. */
+export const showsPassageOf = (reply, shown) => reply.includes(passageHeading(shown))
 
 export function askAboutLine({ line, chapter }) {
   return `想多了解這一句：「${line}」（${chapter.title}）。整段原文我看過了，不用重講經文內容，用白話講重點就好：這段在說什麼，這句在裡面是什麼意思？`
