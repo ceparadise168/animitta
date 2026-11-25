@@ -49,6 +49,13 @@ function setUp({ lines, fire = { ok: true, json: async () => ({ claude_code_sess
 
 const codeError = "Handler error: TypeError: Cannot read properties of undefined (reading '我好累')\n    at foldIntoSummary (file:///var/task/services/memory.mjs:172:31)"
 const keyError = 'Handler error: Error: Anthropic chat failed: 401 authentication_error'
+const summaryNoResponse =
+  'Handler error: Error: Anthropic summary failed: no response\n' +
+  '    at AnthropicProvider.#send (file:///var/task/providers/anthropic.mjs:85:46)\n' +
+  '    at async foldIntoSummary (file:///var/task/services/memory.mjs:160:19)\n' +
+  '    at async compressOldTurns (file:///var/task/services/memory.mjs:212:5) {\n' +
+  '  [cause]: DOMException [TimeoutError]: The operation was aborted due to timeout'
+const chatNoResponse = 'Handler error: Error: Anthropic chat failed: no response'
 
 describe('alert triage', () => {
   it('wakes Claude for a code error with only the summary, and emails the session link', async () => {
@@ -220,5 +227,25 @@ describe('alert triage', () => {
 
     expect(emails()[0].Message).toContain('這次沒有叫到 Claude')
     expect(emails()[0].Message).not.toContain('Claude 正在查，需要改程式')
+  })
+
+  it('still emails a chat failure that comes after a summary failure in the same six hours', async () => {
+    const { handler, sns, logs, emails } = setUp({ lines: [summaryNoResponse] })
+
+    await handler(alarm('animitta-handler-failures'))
+    logs.send.mockResolvedValue({ events: [{ timestamp: NOW, message: chatNoResponse }] })
+    await handler(alarm('animitta-handler-failures'))
+
+    expect(sns.send).toHaveBeenCalledTimes(2)
+    expect(emails()[0].Message).toContain('使用者看到：使用者有收到回覆，只是記憶整理沒做完')
+    expect(emails()[1].Message).toContain('使用者看到：使用者收到道歉。')
+  })
+
+  it('names the step in the subject', async () => {
+    const { handler, emails } = setUp({ lines: [summaryNoResponse] })
+
+    await handler(alarm('animitta-handler-failures'))
+
+    expect(emails()[0].Subject).toBe('[animitta] handler-failures: provider Anthropic summary no response')
   })
 })
