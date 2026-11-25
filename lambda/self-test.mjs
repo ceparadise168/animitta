@@ -2,8 +2,9 @@ import { createHmac } from 'node:crypto'
 import { AnthropicProvider, BedrockBackup } from './providers/anthropic.mjs'
 import { verifySignature } from './line.mjs'
 
-// Proves a deploy can still answer: one short question to Anthropic, one to the
-// backup, and a LINE signature made and checked with the real secret. Traffic
+// Proves a deploy can still answer: one short question to Anthropic (and to
+// the model for worries, when there is one), one to the backup, and a LINE
+// signature made and checked with the real secret. Traffic
 // is too thin for errors to show this within minutes. The results are the
 // bot's own failure messages (status and error type), nothing anyone said.
 const QUESTION = [{ role: 'user', content: '請只回一個字：好' }]
@@ -15,13 +16,25 @@ export async function selfTest({
   secret = process.env.LINE_CHANNEL_SECRET,
 } = {}) {
   const results = {
-    anthropic: await outcome(() => anthropic.chatCompletion(QUESTION, { signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })),
+    anthropic: await outcome(async () => {
+      await anthropic.chatCompletion(QUESTION, { signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })
+      // A wrong name for it would turn every worry into the chat model's answer, unnoticed.
+      if (anthropic.answersWorries) await forWorries(anthropic)
+    }),
     bedrock: backup
       ? await outcome(() => backup.send('chat', { max_tokens: 16, messages: QUESTION }, AbortSignal.timeout(ANSWER_WITHIN_MS)))
       : 'off',
     signature: signatureRoundTrip(secret),
   }
   return { statusCode: 200, body: JSON.stringify(results) }
+}
+
+async function forWorries(anthropic) {
+  try {
+    await anthropic.chatCompletion(QUESTION, { worries: true, signal: AbortSignal.timeout(ANSWER_WITHIN_MS) })
+  } catch (err) {
+    throw new Error(`model for worries: ${err.message}`)
+  }
 }
 
 async function outcome(call) {

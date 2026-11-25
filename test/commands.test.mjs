@@ -173,6 +173,7 @@ describe('commands', () => {
       expect(asked).toContain(`「${DAILY_LINES[17][0]}」`)
       expect(before).toMatch(/^〈一體同觀分第十八〉原文：\n\n/)
       expect(before).toContain('過去心不可得，現在心不可得，未來心不可得。')
+      expect(mockHandleText.mock.calls[0][4].worries).toBe(false)
       expect(mockReplyAndRemember).not.toHaveBeenCalled()
     })
 
@@ -191,7 +192,7 @@ describe('commands', () => {
 
       const [sameChapter, otherChapter] = mockHandleText.mock.calls.slice(1)
       expect(sameChapter[2]).toContain(`「${DAILY_LINES[20][0]}」`)
-      expect(sameChapter[4]).toEqual({})
+      expect(sameChapter[4]).toEqual({ worries: false })
       expect(otherChapter[4].before).toMatch(/^〈非說所說分第二十一〉原文：/)
     })
 

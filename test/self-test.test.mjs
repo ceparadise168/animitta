@@ -23,6 +23,21 @@ describe('selfTest', () => {
     })
   })
 
+  it('asks the model for worries too when there is one, and names it when it is the one that failed', async () => {
+    const both = { answersWorries: true, chatCompletion: jest.fn().mockResolvedValue({ text: '好' }) }
+    const wrongName = {
+      answersWorries: true,
+      chatCompletion: jest.fn(async (_, { worries } = {}) => {
+        if (worries) throw new Error('Anthropic chat failed: 404 not_found_error')
+        return { text: '好' }
+      }),
+    }
+
+    expect((await results({ anthropic: both, backup: null, secret: 'line-secret' })).anthropic).toBe('ok')
+    expect(both.chatCompletion.mock.calls.map(([, options]) => Boolean(options.worries))).toEqual([false, true])
+    expect((await results({ anthropic: wrongName, backup: null, secret: 'line-secret' })).anthropic).toBe('model for worries: Anthropic chat failed: 404 not_found_error')
+  })
+
   it('says the backup is off when none is configured, and when the LINE secret is missing', async () => {
     expect(await results({ anthropic: answers(), backup: null, secret: undefined })).toMatchObject({ bedrock: 'off', signature: 'no secret' })
   })

@@ -169,7 +169,8 @@ async function handleMoreAboutLine(userId, replyToken, shown, sentAt) {
   const shownBefore = everyTurn(await readMemory(userId)).some(
     ({ role, content }) => role === 'assistant' && showsPassageOf(content, shown),
   )
-  return handleText(userId, replyToken, askAboutLine(shown), sentAt, shownBefore ? {} : { before: passageOf(shown) })
+  // A question about the sutra, so there is nothing to sort.
+  return handleText(userId, replyToken, askAboutLine(shown), sentAt, { worries: false, ...(shownBefore ? {} : { before: passageOf(shown) }) })
 }
 
 async function handleClearMemory(replyToken) {

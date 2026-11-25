@@ -76,6 +76,28 @@ describe('buildMessages', () => {
   })
 })
 
+describe('the prompt for the model that answers worries', () => {
+  const built = (worries) => buildMessages({ summary: null, recentTurns: [], userInput: '嗨', worries })
+
+  it('is the same prompt with two additions: do not hold back too far, and a sticker that says it plainly is a crisis', () => {
+    const [usual] = built(false)
+    const [forWorries] = built(true)
+    const calibration = forWorries.content.slice(forWorries.content.indexOf('<校準'), forWorries.content.indexOf('<語言基準>'))
+    const sticker = '字裡明講想死、不想活，就跟他打字說出來一樣，照危機處理做、專線照給，不要因為是貼圖就先當成玩笑。'
+
+    expect(calibration).toContain('多數回覆裡要有一句你自己的觀察')
+    expect(forWorries.content).toContain(sticker)
+    expect(forWorries.content.replace(calibration, '').replace(sticker, '')).toBe(usual.content)
+    expect(usual.content).toBe(SYSTEM_PROMPT)
+  })
+
+  it('says of the prompt and the demos, and of nothing else, that they are the same for everyone', () => {
+    const messages = buildMessages({ summary: '摘要', recentTurns: [{ role: 'user', content: '嗨' }, { role: 'assistant', content: '嗨' }], userInput: '金剛經在講什麼' })
+
+    expect(messages.map((m) => Boolean(m.sameForEveryone))).toEqual([true, true, ...messages.slice(2).map(() => false)])
+  })
+})
+
 describe('SYSTEM_PROMPT', () => {
   it('contains Diamond Sutra content', () => {
     expect(SYSTEM_PROMPT).toContain('金剛經')

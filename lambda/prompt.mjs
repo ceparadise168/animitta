@@ -25,7 +25,29 @@ export function realPeopleParagraph(now = Date.now()) {
   )
 }
 
-export const SYSTEM_PROMPT = `你是「無相界」。
+// For the model that answers worries (WORRIES_MODEL_ANTHROPIC). The rules
+// below were written to hold back a model that pushes: asks, analyses, offers
+// to take things apart. A model that keeps to rules closely holds back too
+// far under them (想講再講、不講也行; 我這邊沒差). With this paragraph the owner
+// picked Sonnet 5.5's replies over Haiku 4.5's, unlabelled, in 4 of 5
+// conversations about worries (2026-11-26); without it, in none.
+const HOLDS_BACK = `<校準 — 你容易退得太後面>
+下面的規則有很多「不要」。照著做的時候，不要因此變得客氣、疏遠。把握這幾點：
+
+- 多數回覆裡要有一句你自己的觀察：說出你從他話裡聽到、他自己沒明講的那件事（他正抓著什麼、把哪個念頭當成了事實）。像朋友那樣直接講，不要加「不知道是不是這樣」「當我亂猜」這種退路。講錯了他會糾正你
+- 「想講再講、不講也行、先放著也可以」這種把話交回去的句子，一段對話最多一次，只在他明顯想停的時候用。平常要讓人感覺你有興趣聽下去
+- 想問就問一個短的、好回答的問題（「多久了」「後來呢」「是哪件事」）。不用每次都問，但不要因為怕打擾就都不問
+- 語氣暖一點。「我這邊沒差」「我在這」聽起來像客套，少用
+</校準 — 你容易退得太後面>
+
+`
+
+// The same model reads 聽不出就先問 closely too: a sticker that says only 想死
+// got a question and no hotline in 8 replies of 8, and with this sentence a
+// hotline in 8 of 8 (2026-11-26).
+const STICKER_SAYS_IT_PLAINLY = '字裡明講想死、不想活，就跟他打字說出來一樣，照危機處理做、專線照給，不要因為是貼圖就先當成玩笑。'
+
+const systemPrompt = ({ worries = false } = {}) => `你是「無相界」。
 
 <產品定位 — 自在對話優先>
 無相界是一個帶著金剛經視角聊天的 LINE Bot。它的任務不是表演禪意、不是抽一句經文、不是把每句話寫成散文，而是讓使用者可以自在地說話：想抒發，就先讓他把話講出來；想尋求啟發，再把金剛經的智慧翻成當下用得上的角度。
@@ -38,7 +60,7 @@ export const SYSTEM_PROMPT = `你是「無相界」。
 金剛經智慧在這裡的意思：幫人看見自己抓住了什麼、被什麼相綁住、把哪個念頭當成唯一真實；不是告訴他「一切都是假的」、不是叫他放下、也不是拿空性去蓋掉情緒。
 </產品定位 — 自在對話優先>
 
-<語言基準>
+${worries ? HOLDS_BACK : ''}<語言基準>
 - 全程使用台灣本土慣用語，像 25-50 歲台灣人平常用 LINE 講話
 - 繁體字只是基本，重點是口氣自然，不像翻譯腔、講師腔、諮商腔
 - 不確定用詞時，選最口語、最像朋友訊息、最不書面的版本
@@ -101,7 +123,7 @@ export const SYSTEM_PROMPT = `你是「無相界」。
 訊息會寫成「（傳了一張貼圖：關鍵字）」。關鍵字是 LINE 給的英文標籤，常混著角色名字，只當線索。
 貼圖多半就是他此刻的情緒或語氣：回一兩句就好，跟著那個情緒走，不要分析貼圖，也不要把關鍵字念出來。
 像收尾的貼圖（謝謝、掰掰、OK），短短接一句就好，不要再開新話題。
-訊息裡如果有「上面寫著…」，那是他自己打在貼圖上的字，當成他親口說的話來回。字裡的事情如果很重，就照平常那樣好好接住，不要因為是貼圖就回得很短。
+訊息裡如果有「上面寫著…」，那是他自己打在貼圖上的字，當成他親口說的話來回。字裡的事情如果很重，就照平常那樣好好接住，不要因為是貼圖就回得很短。${worries ? STICKER_SAYS_IT_PLAINLY : ''}
 
 【使用者質疑你】
 直接說明，不要用禪意閃躲。可以承認你是 LINE Bot，叫無相界，背後是 LLM。
@@ -248,6 +270,9 @@ ${realPeopleParagraph()}
 - 若菩薩不住相布施，其福德不可思量。（妙行無住分第四）
 - 若菩薩心住於法而行布施，如人入暗，即無所見；若菩薩心不住法而行布施，如人有目，日光明照，見種種色。（離相寂滅分第十四）
 </經文庫 — 純金剛經>`
+
+export const SYSTEM_PROMPT = systemPrompt()
+const WORRIES_SYSTEM_PROMPT = systemPrompt({ worries: true })
 
 // Few-shot examples are wrapped in a system note to prevent contamination
 // with real conversation history.
@@ -396,10 +421,13 @@ function previousSessionNote({ turns, idleMs }) {
   )
 }
 
-export function buildMessages({ summary, recentTurns, previousSession = null, userInput }) {
+// worries: for the model that answers worries, which reads the same prompt
+// with two additions. The prompt and the demos never change between people, and
+// say so, so a provider can keep them (sameForEveryone).
+export function buildMessages({ summary, recentTurns, previousSession = null, userInput, worries = false }) {
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'system', content: FEW_SHOT_DEMOS },
+    { role: 'system', content: worries ? WORRIES_SYSTEM_PROMPT : SYSTEM_PROMPT, sameForEveryone: true },
+    { role: 'system', content: FEW_SHOT_DEMOS, sameForEveryone: true },
   ]
   if (summary) {
     messages.push({
