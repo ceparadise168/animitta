@@ -66,6 +66,15 @@ describe('chat service', () => {
       expect(signal.aborted).toBe(false)
     })
 
+    it('keeps the typing animation up for the whole wait, since the answer may take 55 seconds', async () => {
+      const { showLoadingIndicator } = await import('../lambda/line.mjs')
+      mockProvider.chatCompletion.mockResolvedValue({ text: '嗯' })
+
+      await handleText('user1', 'token1', '我好累', Date.now())
+
+      expect(showLoadingIndicator).toHaveBeenCalledWith('user1', 60)
+    })
+
     it('fails instead of waiting when the model is still writing at the deadline', async () => {
       mockProvider.chatCompletion.mockImplementation(
         (messages, { signal }) =>

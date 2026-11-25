@@ -25,8 +25,9 @@ const ERROR_CODES = new Set(['enforced_spend_limit_reached', 'ramp_limit_exceede
 // spend cap is a 429 too, but it lasts until next month, so that one moves on.
 const SPEND_CAP = 'enforced_spend_limit_reached'
 // Up to two summaries are written after the reply, which itself may take 55
-// seconds, and all of it has to end within the function's 90 seconds. One try
-// at Anthropic gets about half, so a hung Anthropic leaves the backup time.
+// seconds, and all of it has to end within the function's 90 seconds. With a
+// backup, one try at Anthropic gets about half, so a hung Anthropic leaves the
+// backup time. Without one, the try gets all of it.
 const SUMMARY_BUDGET_MS = 15_000
 
 export class AnthropicProvider extends LlmProvider {
@@ -39,18 +40,21 @@ export class AnthropicProvider extends LlmProvider {
   #chatAttemptMs
   #fastFailureMs
   #summaryAttemptMs
+  #summaryBudgetMs
 
-  // chatAttemptMs: the most one try at Anthropic may take before the backup
-  // gets its turn, so a hung Anthropic does not use up the whole deadline.
+  // chatAttemptMs, summaryAttemptMs: with a backup, the most one try at
+  // Anthropic may take before the backup gets its turn, so a hung Anthropic
+  // does not use up the whole deadline. Without a backup they do not apply.
   // fastFailureMs: a failure quicker than this may be retried; a slower one
   // goes to the backup.
-  constructor({ backup = bedrockFromEnv(), retryPauseMs = 1000, chatAttemptMs = 20_000, summaryAttemptMs = 7_000, fastFailureMs = 5_000 } = {}) {
+  constructor({ backup = bedrockFromEnv(), retryPauseMs = 1000, chatAttemptMs = 20_000, summaryAttemptMs = 7_000, summaryBudgetMs = SUMMARY_BUDGET_MS, fastFailureMs = 5_000 } = {}) {
     super()
     this.#backup = backup
     this.#retryPauseMs = retryPauseMs
     this.#chatAttemptMs = chatAttemptMs
     this.#fastFailureMs = fastFailureMs
     this.#summaryAttemptMs = summaryAttemptMs
+    this.#summaryBudgetMs = summaryBudgetMs
     this.#apiKey = process.env.ANTHROPIC_API_KEY
     this.#chatModel =
       process.env.CHAT_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
@@ -59,24 +63,28 @@ export class AnthropicProvider extends LlmProvider {
       process.env.SUMMARY_MODEL_ANTHROPIC || 'claude-haiku-4-5-20251001'
   }
 
-  // deadline: when the caller's signal fires (ms since epoch). With little
-  // time left, as after a long voice transcription, one try gets only half of
-  // it, so the backup still has the other half.
+  // deadline: when the caller's signal fires (ms since epoch). With a backup
+  // and little time left, as after a long voice transcription, one try gets
+  // only half of it, so the backup still has the other half. Without a
+  // backup, the try runs until the signal fires.
   async chatCompletion(messages, { signal, deadline } = {}) {
     const { system, userMessages } = this.#extractSystem(messages)
     const body = { ...this.#chatTuning(), ...(system && { system }), messages: userMessages }
     const attemptMs = () => (deadline ? Math.min(this.#chatAttemptMs, Math.max(1_000, (deadline - Date.now()) / 2)) : this.#chatAttemptMs)
-    const data = await this.#send('chat', this.#chatModel, body, signal, attemptMs)
+    const data = await this.#send('chat', this.#chatModel, body, { signal, attemptMs })
     return { text: readReplyText(data) }
   }
 
   // Anthropic first, once more if the failure looks temporary, then the
-  // backup: the same model on Amazon Bedrock, given the same request. The
-  // signal is the caller's deadline; once it fires nothing more is tried.
-  async #send(op, model, body, signal, attemptMs) {
+  // backup: the same model on Amazon Bedrock, given the same request. Once
+  // the caller's signal or the provider's own budget ends, nothing more is
+  // tried. The caller's signal ends it with the caller's own error; the
+  // budget ends it as no response, which the alert reads.
+  async #send(op, model, body, { signal, budgetMs, attemptMs }) {
+    const budget = budgetMs ? withTimeout(signal, budgetMs) : signal
     let failure
     for (let attempt = 1; attempt <= 2; attempt++) {
-      const attemptSignal = withTimeout(signal, attemptMs())
+      const attemptSignal = this.#backup ? withTimeout(budget, attemptMs()) : budget
       const startedAt = Date.now()
       try {
         return await askAnthropic(op, this.#apiKey, model, body, attemptSignal)
@@ -85,16 +93,16 @@ export class AnthropicProvider extends LlmProvider {
         failure = gaveUp ? Object.assign(new Error(`Anthropic ${op} failed: no response`), { cause: err }) : err
       }
       const fast = Date.now() - startedAt < this.#fastFailureMs
-      if (signal?.aborted || attempt === 2 || !fast || !isTemporary(failure)) break
-      await pause(this.#retryPauseMs, signal)
-      if (signal?.aborted) break
+      if (budget?.aborted || attempt === 2 || !fast || !isTemporary(failure)) break
+      await pause(this.#retryPauseMs, budget)
+      if (budget?.aborted) break
     }
     const rateLimited = failure.status === 429 && failure.code !== SPEND_CAP
     // A limit Eric set himself in the Console is his to lift, not to route around.
     const ownLimit = failure.code === 'specified_limit_reached'
-    if (!this.#backup || signal?.aborted || rateLimited || ownLimit) throw failure
+    if (!this.#backup || budget?.aborted || rateLimited || ownLimit) throw failure
     try {
-      const data = await this.#backup.send(op, body, signal)
+      const data = await this.#backup.send(op, body, budget)
       // Counted by an alarm: people still get answers, but Anthropic is down.
       console.warn(`Provider fallback: ${failure.message} -> Bedrock ${op} ok`)
       return data
@@ -113,7 +121,7 @@ export class AnthropicProvider extends LlmProvider {
       : { max_tokens: 1024, temperature: 0.8 }
   }
 
-  async summarize(existingSummary, turns, { signal = AbortSignal.timeout(SUMMARY_BUDGET_MS) } = {}) {
+  async summarize(existingSummary, turns) {
     const turnsText = turns
       .map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
       .join('\n')
@@ -139,7 +147,10 @@ export class AnthropicProvider extends LlmProvider {
       `需要壓縮的對話：\n${turnsText}`
 
     const body = { max_tokens: 1024, temperature: 0.3, messages: [{ role: 'user', content: prompt }] }
-    const data = await this.#send('summary', this.#summaryModel, body, signal, () => this.#summaryAttemptMs)
+    const data = await this.#send('summary', this.#summaryModel, body, {
+      budgetMs: this.#summaryBudgetMs,
+      attemptMs: () => this.#summaryAttemptMs,
+    })
     return data.content[0].text
   }
 
@@ -194,7 +205,8 @@ async function askAnthropic(op, apiKey, model, body, signal) {
   if (!res.ok) throw await anthropicFailure(op, res)
   try {
     return await res.json()
-  } catch {
+  } catch (err) {
+    if (signal?.aborted) throw err
     throw new Error(`Anthropic ${op} failed: unreadable reply`)
   }
 }

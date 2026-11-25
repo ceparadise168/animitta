@@ -21,7 +21,8 @@ const answerWithin = (sentAt) => Math.max(5_000, sentAt + 55_000 - Date.now())
 export async function handleText(userId, replyToken, userText, sentAt, { onReplied, before } = {}) {
   const provider = getProvider()
 
-  showLoadingIndicator(userId).catch((err) => console.warn(err.message))
+  // The answer may take until the 55-second deadline; LINE's own default is 20.
+  showLoadingIndicator(userId, 60).catch((err) => console.warn(err.message))
 
   let context, reply
   try {
