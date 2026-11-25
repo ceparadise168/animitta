@@ -101,6 +101,14 @@ describe('commands', () => {
     expect(text).toContain('每月上限 25 分鐘')
   })
 
+  it('links to the public code, with nothing after the link on its line so LINE makes all of it tappable', async () => {
+    await handleCommand('user1', 'token1', '@關於')
+
+    expect(mockReplyMessage.mock.calls[0][1]).toMatch(
+      /想看它怎麼處理你的訊息都可以：https:\/\/github\.com\/ceparadise168\/animitta\n/
+    )
+  })
+
 
   it.each([
     ['the menu button', () => handlePostback('user1', 'token1', 'action=daily_line', Date.parse('2026-11-23T09:00:00+08:00'))],
