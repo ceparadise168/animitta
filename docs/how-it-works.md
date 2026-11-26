@@ -56,6 +56,12 @@ Conversation memory holds the last turns, plus an LLM-compressed summary for lon
 
 A person's turns and summary are gone `CONVERSATION_TTL_DAYS` (30) days after their last message. Each turn expires that long after it was said, the summary that long after the latest exchange. 關於 quotes the number. The function's log group has the same retention, and a handler error is logged without the words that went unanswered. The voice minute counter is kept 40 days, so a month's quota holds.
 
+## What is counted
+
+Each message is counted by how it came in, and by nothing else: `PressedToRead` (每日一句 from the menu or typed, and 多了解這一段 and 再給一句 under a line), `PressedOther` (隨意聊聊, 清除記憶 and its confirmation, 關於) or `SaidInOwnWords` (typed, spoken, or a sticker). For each one the function writes a line in CloudWatch's embedded metric format, and CloudWatch keeps the three numbers as metrics in the `Animitta` namespace. The line holds no user id, none of the words, and not which button it was beyond reading or not. A photo, a video, a file, a location, a new follower and group chats are not counted. A voice message sent as a link from outside LINE, which the bot cannot open, still counts as `SaidInOwnWords`. LINE sends a webhook again when a try got no answer, so a retried message is counted twice.
+
+With Lambda's own count of requests, these are the numbers the maintainer looks at to see how the bot is used. Conversations are not read for it.
+
 ## When Anthropic fails
 
 A fast 5xx or 529, or a dropped connection, is tried once more; anything else except a rate limit (429) goes to the backup, the same Claude model on Amazon Bedrock (`BEDROCK_MODEL_ID`, a `jp.` profile that runs only in Tokyo and Osaka). One try at Anthropic gets at most 20 seconds, so a hung Anthropic still leaves the backup time before the 55-second deadline.
