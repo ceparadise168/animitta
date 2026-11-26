@@ -1,6 +1,6 @@
 import { describe, it, expect, jest, afterEach } from '@jest/globals'
 import { createHmac } from 'node:crypto'
-import { verifySignature, showLoadingIndicator, downloadContent, replyMessage } from '../lambda/line.mjs'
+import { verifySignature, showLoadingIndicator, downloadContent, replyMessage, replyWithQuickReply } from '../lambda/line.mjs'
 
 
 describe('verifySignature', () => {
@@ -105,6 +105,19 @@ describe('replyMessage', () => {
     expect(body.messages).toEqual([
       { type: 'text', text: '原文' },
       { type: 'text', text: '解釋' },
+    ])
+  })
+
+  it('puts Quick Reply buttons under the last of several messages, the only place LINE shows them', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true })
+
+    await replyWithQuickReply('tok', ['原文', '解釋'], [{ label: '再給一句', data: 'action=daily_line_next&line=3' }])
+
+    const [passage, explanation] = JSON.parse(fetchMock.mock.calls[0][1].body).messages
+    expect(passage).toEqual({ type: 'text', text: '原文' })
+    expect(explanation.text).toBe('解釋')
+    expect(explanation.quickReply.items).toEqual([
+      { type: 'action', action: { type: 'postback', label: '再給一句', data: 'action=daily_line_next&line=3', displayText: '再給一句' } },
     ])
   })
 

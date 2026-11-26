@@ -136,6 +136,17 @@ describe('chat service', () => {
       expect(mockSaveTurn).toHaveBeenCalledWith('user1', '想多了解這一句', '〈一體同觀分第十八〉原文：…\n\n這段在講心抓不住', 1795270000000)
     })
 
+    it('puts buttons under the answer when asked, after the fixed message, and remembers the same', async () => {
+      mockProvider.chatCompletion.mockResolvedValue({ text: '這段在講心抓不住' })
+      const quickReply = [{ label: '再給一句', data: 'action=daily_line_next&line=17' }]
+
+      await handleText('user1', 'token1', '想多了解這一句', 1795270000000, { before: '〈一體同觀分第十八〉原文：…', quickReply })
+
+      expect(mockReplyWithQuickReply).toHaveBeenCalledWith('token1', ['〈一體同觀分第十八〉原文：…', '這段在講心抓不住'], quickReply)
+      expect(mockReplyMessage).not.toHaveBeenCalled()
+      expect(mockSaveTurn).toHaveBeenCalledWith('user1', '想多了解這一句', '〈一體同觀分第十八〉原文：…\n\n這段在講心抓不住', 1795270000000)
+    })
+
     it('says which words went unanswered when the model fails', async () => {
       mockProvider.chatCompletion.mockRejectedValue(new Error('Anthropic chat failed: 529'))
 

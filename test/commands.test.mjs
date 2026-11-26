@@ -176,6 +176,12 @@ describe('commands', () => {
       expect(mockReplyAndRemember).not.toHaveBeenCalled()
     })
 
+    it('多了解這一段 puts 再給一句 alone under the explanation, reading on from that line', async () => {
+      await handlePostback('user1', 'token1', 'action=daily_line_more&line=17', MORNING)
+
+      expect(mockHandleText.mock.calls[0][4].quickReply).toEqual([{ label: '再給一句', data: 'action=daily_line_next&line=17' }])
+    })
+
     it('多了解這一段 leaves out a chapter it already showed, and still asks about the line', async () => {
       await handlePostback('user1', 'token1', 'action=daily_line_more&line=19', MORNING)
       const [, , asked, , { before }] = mockHandleText.mock.calls[0]
@@ -191,7 +197,7 @@ describe('commands', () => {
 
       const [sameChapter, otherChapter] = mockHandleText.mock.calls.slice(1)
       expect(sameChapter[2]).toContain(`「${DAILY_LINES[20][0]}」`)
-      expect(sameChapter[4]).toEqual({})
+      expect(sameChapter[4]).toEqual({ quickReply: [{ label: '再給一句', data: 'action=daily_line_next&line=20' }] })
       expect(otherChapter[4].before).toMatch(/^〈非說所說分第二十一〉原文：/)
     })
 

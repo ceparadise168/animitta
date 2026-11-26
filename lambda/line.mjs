@@ -69,9 +69,10 @@ export async function replyMessage(replyToken, text) {
 }
 
 /**
- * Reply with a text message and Quick Reply buttons.
+ * Reply with text and Quick Reply buttons. text is one message or several;
+ * the buttons go under the last one, the only place LINE shows them.
  * @param {string} replyToken
- * @param {string} text
+ * @param {string | string[]} text
  * @param {Array<{label: string, data: string}>} items - postback quick reply items
  */
 export async function replyWithQuickReply(replyToken, text, items) {
@@ -84,9 +85,10 @@ export async function replyWithQuickReply(replyToken, text, items) {
     body: JSON.stringify({
       replyToken,
       messages: [
+        ...[text].flat().slice(0, -1).map((t) => ({ type: 'text', text: t })),
         {
           type: 'text',
-          text,
+          text: [text].flat().at(-1),
           quickReply: {
             items: items.map((item) => ({
               type: 'action',

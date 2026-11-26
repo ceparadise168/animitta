@@ -16,9 +16,10 @@ const answerWithin = (sentAt) => Math.max(5_000, sentAt + 55_000 - Date.now())
  * Answer the user's words. onReplied runs once the reply has reached LINE, so
  * a caller can tell a failure before the answer from one after it. before is
  * a fixed message sent ahead of the model's answer in the same reply, such as
- * a passage of the sutra, and is remembered with it.
+ * a passage of the sutra, and is remembered with it. quickReply puts buttons
+ * under the answer.
  */
-export async function handleText(userId, replyToken, userText, sentAt, { onReplied, before } = {}) {
+export async function handleText(userId, replyToken, userText, sentAt, { onReplied, before, quickReply } = {}) {
   const provider = getProvider()
 
   // The answer may take until the 55-second deadline; LINE's own default is 20.
@@ -33,7 +34,8 @@ export async function handleText(userId, replyToken, userText, sentAt, { onRepli
       deadline: Date.now() + budget,
     })
     reply = stripMarkdown(text)
-    await replyMessage(replyToken, before ? [before, reply] : reply)
+    const messages = before ? [before, reply] : reply
+    await (quickReply ? replyWithQuickReply(replyToken, messages, quickReply) : replyMessage(replyToken, messages))
   } catch (err) {
     // Whoever apologises instead has to know what went unanswered.
     throw withUnanswered(err, userText)
