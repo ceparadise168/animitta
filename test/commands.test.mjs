@@ -144,8 +144,8 @@ describe('commands', () => {
 
       const { index } = todaysLine(MORNING)
       expect(buttonsOf(mockReplyAndRemember.mock.calls[0])).toEqual([
-        { label: '多了解這一段', data: `action=daily_line_more&line=${index}` },
-        { label: '再給一句', data: `action=daily_line_next&line=${index}` },
+        { label: '多了解這一段', data: `action=daily_line_more&line=${index}`, inputOption: 'openKeyboard' },
+        { label: '再給一句', data: `action=daily_line_next&line=${index}`, inputOption: 'openKeyboard' },
       ])
     })
 
@@ -179,7 +179,7 @@ describe('commands', () => {
     it('多了解這一段 puts 再給一句 alone under the explanation, reading on from that line', async () => {
       await handlePostback('user1', 'token1', 'action=daily_line_more&line=17', MORNING)
 
-      expect(mockHandleText.mock.calls[0][4].quickReply).toEqual([{ label: '再給一句', data: 'action=daily_line_next&line=17' }])
+      expect(mockHandleText.mock.calls[0][4].quickReply).toEqual([{ label: '再給一句', data: 'action=daily_line_next&line=17', inputOption: 'openKeyboard' }])
     })
 
     it('多了解這一段 leaves out a chapter it already showed, and still asks about the line', async () => {
@@ -197,7 +197,7 @@ describe('commands', () => {
 
       const [sameChapter, otherChapter] = mockHandleText.mock.calls.slice(1)
       expect(sameChapter[2]).toContain(`「${DAILY_LINES[20][0]}」`)
-      expect(sameChapter[4]).toEqual({ quickReply: [{ label: '再給一句', data: 'action=daily_line_next&line=20' }] })
+      expect(sameChapter[4]).toEqual({ quickReply: [{ label: '再給一句', data: 'action=daily_line_next&line=20', inputOption: 'openKeyboard' }] })
       expect(otherChapter[4].before).toMatch(/^〈非說所說分第二十一〉原文：/)
     })
 
