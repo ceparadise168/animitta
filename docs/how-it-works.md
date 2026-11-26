@@ -58,7 +58,7 @@ A person's turns and summary are gone `CONVERSATION_TTL_DAYS` (30) days after th
 
 ## What is counted
 
-Each message is counted by how it came in, and by nothing else: `PressedAButton` (the menu, or a button under a message) or `SaidInOwnWords` (typed, spoken, or a sticker). For each one the function writes a line in CloudWatch's embedded metric format, and CloudWatch keeps the two numbers as metrics in the `Animitta` namespace. The line holds no user id, none of the words, and not which button it was. A photo, a file, a new follower and group chats are not counted. LINE sends a webhook again when a try got no answer, so a retried message is counted twice.
+Each message is counted by how it came in, and by nothing else: `PressedToRead` (每日一句 from the menu or typed, and 多了解這一段 and 再給一句 under a line), `PressedOther` (隨意聊聊, 清除記憶 and its confirmation, 關於) or `SaidInOwnWords` (typed, spoken, or a sticker). For each one the function writes a line in CloudWatch's embedded metric format, and CloudWatch keeps the three numbers as metrics in the `Animitta` namespace. The line holds no user id, none of the words, and not which button it was beyond reading or not. A photo, a file, a new follower and group chats are not counted. LINE sends a webhook again when a try got no answer, so a retried message is counted twice.
 
 With Lambda's own count of requests, these are the numbers the maintainer looks at to see how the bot is used. Conversations are not read for it.
 

@@ -66,16 +66,31 @@ describe('Lambda handler', () => {
   }
   const countedIn = (lines) => lines.map((line) => JSON.parse(line)).flatMap((counted) => counted._aws.CloudWatchMetrics[0].Metrics.map(({ Name }) => Name))
 
-  it('counts how each message came in: a button pressed, or the person\'s own words', async () => {
+  it('counts how each message came in: a button for reading, another button, or the person\'s own words', async () => {
     const lines = await stdoutWhileHandling([
       { type: 'postback', postback: { data: 'action=daily_line' } },
+      { type: 'postback', postback: { data: 'action=daily_line_more&line=7' } },
+      { type: 'postback', postback: { data: 'action=daily_line_next&line=7' } },
+      { type: 'message', message: { type: 'text', text: '@每日一句' } },
+      { type: 'postback', postback: { data: 'action=casual_chat' } },
+      { type: 'postback', postback: { data: 'confirm:clear' } },
       { type: 'message', message: { type: 'text', text: '@隨意聊聊' } },
       { type: 'message', message: { type: 'text', text: '今天好累' } },
       { type: 'message', message: { type: 'sticker', keywords: ['tired'] } },
       { type: 'message', message: { type: 'audio', id: 'a1', duration: 3000, contentProvider: { type: 'line' } } },
     ])
 
-    expect(countedIn(lines)).toEqual(['PressedAButton', 'PressedAButton', 'SaidInOwnWords', 'SaidInOwnWords', 'SaidInOwnWords'])
+    expect(countedIn(lines)).toEqual([
+      'PressedToRead', 'PressedToRead', 'PressedToRead', 'PressedToRead',
+      'PressedOther', 'PressedOther', 'PressedOther',
+      'SaidInOwnWords', 'SaidInOwnWords', 'SaidInOwnWords',
+    ])
+  })
+
+  it('does not count a postback that only starts like a reading one as reading', async () => {
+    const lines = await stdoutWhileHandling([{ type: 'postback', postback: { data: 'action=daily_lines_of_something' } }])
+
+    expect(countedIn(lines)).toEqual(['PressedOther'])
   })
 
   it('writes each count as one line of pure JSON in CloudWatch\'s metric format, with no dimensions', async () => {

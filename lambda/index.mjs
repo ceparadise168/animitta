@@ -54,21 +54,31 @@ export async function handler(event) {
   return { statusCode: 200, body: 'OK' }
 }
 
-// How a message came in: a button pressed (the menu, or one under a message),
-// or something said in the person's own words (typed, spoken or a sticker).
-// A photo or a file is neither, and a new follower has sent nothing yet. An
-// event it cannot read counts as nothing, so counting never costs a reply.
-function howTheyCameIn({ type, message }) {
-  if (type === 'postback') return 'PressedAButton'
+// The buttons for reading the sutra: 每日一句 (the menu's postback, or its
+// typed form), and 多了解這一段 and 再給一句 under a line.
+const READING_POSTBACK = /^action=daily_line(_more|_next)?(&|$)/
+const READING_COMMAND = '@每日一句'
+
+// How a message came in: a button for reading the sutra, any other button
+// (隨意聊聊, 清除記憶 and its confirmation, 關於), or the person's own words
+// (typed, spoken or a sticker). A photo or a file is none of these, and a new
+// follower has sent nothing yet. An event it cannot read counts as nothing,
+// so counting never costs a reply.
+function howTheyCameIn({ type, message, postback }) {
+  if (type === 'postback') return READING_POSTBACK.test(postback?.data ?? '') ? 'PressedToRead' : 'PressedOther'
   if (type !== 'message') return null
-  if (message?.type === 'text') return isCommand(message.text) ? 'PressedAButton' : 'SaidInOwnWords'
+  if (message?.type === 'text') {
+    if (message.text === READING_COMMAND) return 'PressedToRead'
+    return isCommand(message.text) ? 'PressedOther' : 'SaidInOwnWords'
+  }
   return ['sticker', 'audio'].includes(message?.type) ? 'SaidInOwnWords' : null
 }
 
 // Counted so the maintainer can see how the bot is used without reading any
 // conversation: only how the message came in, never who sent it, what it said
-// or which button it was. One line in CloudWatch's embedded metric format
-// becomes the Animitta metrics PressedAButton and SaidInOwnWords. It goes
+// or which button it was beyond reading or not (Eric, 2026-11-26). One line in
+// CloudWatch's embedded metric format becomes the Animitta metrics
+// PressedToRead, PressedOther and SaidInOwnWords. It goes
 // straight to stdout because the format takes a line of pure JSON, and
 // console.log would put a timestamp before it. LINE sends a webhook again when
 // a try got no answer, so a retried message is counted twice.
