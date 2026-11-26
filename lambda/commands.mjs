@@ -87,13 +87,12 @@ async function handleCasualChat(userId, replyToken, sentAt) {
 // Under each 每日一句 message, two buttons: 多了解這一段 shows the whole chapter
 // as it reads, then the model explains it like a question the person typed; 再給一句
 // brings the next line in the sutra's order, so it is reading on, not a draw.
-// The buttons go only under these fixed lines, never under chat replies (the
-// suggestion buttons taken off on 2026-05-21 had people tapping instead of
-// thinking).
-const lineFollowUps = ({ index }) => [
-  { label: '多了解這一段', data: `action=daily_line_more&line=${index}` },
-  { label: '再給一句', data: `action=daily_line_next&line=${index}` },
-]
+// Under the explanation, 再給一句 alone, so a reader can go on line by line
+// without the menu (Eric, 2026-11-26). No buttons go under other chat replies
+// (the suggestion buttons taken off on 2026-05-21 had people tapping instead
+// of thinking); reading on is the tapping wanted here.
+const readOn = ({ index }) => ({ label: '再給一句', data: `action=daily_line_next&line=${index}` })
+const lineFollowUps = (shown) => [{ label: '多了解這一段', data: `action=daily_line_more&line=${shown.index}` }, readOn(shown)]
 
 // The line a button was under; an unreadable one means today's.
 function lineShown(written, sentAt) {
@@ -169,7 +168,10 @@ async function handleMoreAboutLine(userId, replyToken, shown, sentAt) {
   const shownBefore = everyTurn(await readMemory(userId)).some(
     ({ role, content }) => role === 'assistant' && showsPassageOf(content, shown),
   )
-  return handleText(userId, replyToken, askAboutLine(shown), sentAt, shownBefore ? {} : { before: passageOf(shown) })
+  return handleText(userId, replyToken, askAboutLine(shown), sentAt, {
+    quickReply: [readOn(shown)],
+    ...(shownBefore ? {} : { before: passageOf(shown) }),
+  })
 }
 
 async function handleClearMemory(replyToken) {
