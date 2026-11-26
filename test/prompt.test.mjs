@@ -132,6 +132,10 @@ describe('SYSTEM_PROMPT', () => {
     expect(SYSTEM_PROMPT).toContain('聽不出他是不是認真的，就直接問他一句，先不要丟專線')
   })
 
+  it('mentions 每日一句 once when someone only says hello, not in every reply', () => {
+    expect(SYSTEM_PROMPT).toMatch(/只是打招呼[\s\S]*「每日一句」[\s\S]*一段對話提一次就好/)
+  })
+
   it('says when 1980 answers, breaks included', () => {
     expect(SYSTEM_PROMPT).toContain('1980 張老師只有部分時段有人接（週一到六 9 到 12 點、14 到 17 點、18 點到晚上九點半，週日 9 到 12 點、14 到 17 點）')
   })
