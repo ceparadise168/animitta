@@ -91,8 +91,15 @@ async function handleCasualChat(userId, replyToken, sentAt) {
 // without the menu (Eric, 2026-11-26). No buttons go under other chat replies
 // (the suggestion buttons taken off on 2026-05-21 had people tapping instead
 // of thinking); reading on is the tapping wanted here.
-const readOn = ({ index }) => ({ label: '再給一句', data: `action=daily_line_next&line=${index}` })
-const lineFollowUps = (shown) => [{ label: '多了解這一段', data: `action=daily_line_more&line=${shown.index}` }, readOn(shown)]
+// Both open the keyboard when pressed, so the next message comes with its
+// buttons above the keyboard and typing a question stays as easy as pressing
+// on (2026-11-26: with no keyboard, the one button was all Eric could see).
+const OPEN_KEYBOARD = { inputOption: 'openKeyboard' }
+const readOn = ({ index }) => ({ label: '再給一句', data: `action=daily_line_next&line=${index}`, ...OPEN_KEYBOARD })
+const lineFollowUps = (shown) => [
+  { label: '多了解這一段', data: `action=daily_line_more&line=${shown.index}`, ...OPEN_KEYBOARD },
+  readOn(shown),
+]
 
 // The line a button was under; an unreadable one means today's.
 function lineShown(written, sentAt) {
